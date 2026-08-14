@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Diagnostic Grist</title>
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <style>
+    body { font-family: monospace; font-size: 13px; padding: 1rem; background: #fafafa; }
+    h2 { color: #01294b; margin-top: 1.5rem; }
+    pre { background: white; border: 1px solid #ddd; padding: 1rem; overflow: auto; border-radius: 4px; }
+    .error { color: #b00020; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>Diagnostic des tables Grist</h1>
+  <p>Ce widget liste les tables et les noms de colonnes internes tels que Grist les expose à l'API — utile pour caler le mapping du widget final.</p>
+  <div id="output">Connexion à Grist…</div>
+
+  <script>
+    const output = document.getElementById("output");
+
+    function renderSection(title, content) {
+      const h = document.createElement("h2");
+      h.textContent = title;
+      const pre = document.createElement("pre");
+      pre.textContent = typeof content === "string" ? content : JSON.stringify(content, null, 2);
+      output.appendChild(h);
+      output.appendChild(pre);
+    }
+
+    async function run() {
+      output.textContent = "";
+
+      grist.ready({ requiredAccess: "full" });
+
+      // Liste toutes les tables du document
+      let tables;
+      try {
+        tables = await grist.docApi.listTables();
+        renderSection("Tables disponibles dans le document", tables);
+      } catch (err) {
+        renderSection("Erreur listTables", String(err));
+        return;
+      }
+
+      // Pour chaque table, affiche les noms de colonnes (clés du premier fetch)
+      for (const t of tables) {
+        try {
+          const data = await grist.docApi.fetchTable(t);
+          const keys = Object.keys(data);
+          const firstRowPreview = {};
+          for (const k of keys) firstRowPreview[k] = data[k][0];
+          renderSection(`Colonnes de "${t}"`, { colonnes: keys, exemple_premiere_ligne: firstRowPreview });
+        } catch (err) {
+          renderSection(`Erreur sur la table "${t}"`, String(err));
+        }
+      }
+
+      // Affiche aussi ce que voit le widget via la table liée (onRecords)
+      grist.onRecords((records) => {
+        if (records && records.length) {
+          renderSection("Table liée au widget (via onRecords) — colonnes vues", Object.keys(records[0]));
+          renderSection("Table liée au widget — 1ère ligne complète", records[0]);
+        }
+      });
+    }
+
+    run().catch((err) => {
+      const p = document.createElement("p");
+      p.className = "error";
+      p.textContent = "Erreur générale : " + err;
+      output.appendChild(p);
+    });
+  </script>
+</body>
+</html>
