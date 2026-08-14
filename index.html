@@ -5,10 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cartographie des actions internationales</title>
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
-    <script type="module" crossorigin src="./assets/index-Cc2Xq-bY.js"></script>
+    <script type="module" crossorigin src="./assets/index-D8-VtGRO.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-lw3D20XE.css">
   </head>
   <body>
+    <div id="error-banner" style="display:none; background:#ffe0e0; color:#900; border:2px solid #c00; padding:10px; margin:10px; font-family:monospace; font-size:12px; white-space:pre-wrap; word-break:break-word;"></div>
+    <script>
+      function showError(msg) {
+        var el = document.getElementById("error-banner");
+        el.style.display = "block";
+        el.textContent += msg + "\n\n";
+      }
+      window.addEventListener("error", function (e) {
+        showError("ERREUR JS : " + e.message + " (" + e.filename + ":" + e.lineno + ")");
+      });
+      window.addEventListener("unhandledrejection", function (e) {
+        showError("PROMESSE REJETÉE : " + (e.reason && e.reason.stack ? e.reason.stack : e.reason));
+      });
+    </script>
     <header id="header">
       <h1>Cartographie des actions internationales</h1>
     </header>
