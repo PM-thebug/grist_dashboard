@@ -117,6 +117,7 @@ tr.total td { font-weight: 700; background: #fff; border-top: 1px solid var(--li
 
 <script>
 "use strict";
+const VERSION = "5 oct. 2026 · v5 (INSTITUT_institut_nom)";
 // ============================================================================
 // 1. PARAMÈTRES — mêmes règles que le script R synthese_actions_internationales.R
 // ============================================================================
@@ -127,7 +128,7 @@ const P = {
   colonnes: {
     actions: { action: "ACTION", montant: "MONTANT (2026)", categorie: "CATEGORIE D'ACTION",
                type: "TYPE D'ACTION", pays: "PAYS", secteur: "SECTEUR DEI",
-               institut: "INSTITUT", institut_nom: "INSTITUT_nom" },
+               institut: "INSTITUT", institut_nom: ["INSTITUT_institut_nom", "INSTITUT_nom"] },
     financements: { action: "Action", source: "Source", annee: "Année", montant: "Montant prévu",
                     montant_norm: "Montant par effectif de 1000 chercheurs" }
   },
@@ -246,6 +247,7 @@ async function lireMeta() {
 
 // Repère la colonne Grist correspondant à un libellé attendu
 function trouverColonne(colsTable, libelle) {
+  if (Array.isArray(libelle)) { for (const l of libelle) { const c = trouverColonne(colsTable, l); if (c) return c; } return null; }
   const n = norm(libelle);
   return colsTable.find(c => norm(c.label) === n) || colsTable.find(c => norm(c.colId) === n) || null;
 }
@@ -295,24 +297,39 @@ async function chargerDonnees(options) {
   async function lire(tid, roles) {
     const cols = await colonnesDe(tid);
     const data = await table(tid);
-    const out = { n: data.id.length, manquantes: [] };
+    const out = { n: data.id.length, manquantes: [], cols: {}, ref: {} };
     for (const [role, lib] of Object.entries(roles)) {
       const c = trouverColonne(cols, lib);
+      out.cols[role] = c ? `${c.label}${c.colId !== c.label ? " [" + c.colId + "]" : ""} — ${c.type}` : null;
       if (!c) { if (!P.facultatives.includes(role)) out.manquantes.push(lib); out[role] = new Array(data.id.length).fill(null); }
-      else out[role] = await valeurs(tid, c);
+      else {
+        out[role] = await valeurs(tid, c);
+        const m = /^Ref(List)?:(.+)$/.exec(c.type || "");
+        if (m) out.ref[role] = { table: m[2], visible: c.visibleCol && c.visibleCol.colId };
+      }
     }
     return out;
   }
   const A = await lire(tA, ca), F = await lire(tF, cf);
   const manq = [...A.manquantes.map(x => `${tA} : ${x}`), ...F.manquantes.map(x => `${tF} : ${x}`)];
   if (manq.length) throw new Error("Colonnes introuvables — " + manq.join(" ; "));
-  return { tA, tF, A, F };
+  // Libellés des instituts lus dans la table référencée par INSTITUT (si c'est une colonne
+  // Référence) : colonne affichée = code, autre colonne contenant « NOM » = libellé
+  let nomsRef = {};
+  const ri = A.ref.institut;
+  if (ri && ri.visible) {
+    const t = await table(ri.table);
+    const cols = await colonnesDe(ri.table);
+    const cNom = cols.find(c => c.colId !== ri.visible && norm(c.label).includes("NOM")) || cols.find(c => c.colId !== ri.visible && norm(c.colId).includes("NOM"));
+    if (cNom) t.id.forEach((_, i) => { const k = t[ri.visible][i], v = t[cNom.colId][i]; if (k && v && typeof v === "string") nomsRef[norm(k)] = squish(v); });
+  }
+  return { tA, tF, A, F, nomsRef };
 }
 
 // ============================================================================
 // 4. PRÉPARATION — reproduit la section 2 du script R
 // ============================================================================
-function preparer({ tA, tF, A, F }) {
+function preparer({ tA, tF, A, F, nomsRef }) {
   const messages = [];
   // --- Actions
   let actions = [];
@@ -336,15 +353,18 @@ function preparer({ tA, tF, A, F }) {
   actions.forEach((r, i) => r.id = "A" + (i + 1));
   if (sansMontant) messages.push(`${sansMontant} action(s) sans montant numérique ignorée(s)`);
 
-  // Libellés des instituts : code -> INSTITUT_nom le plus fréquent (actions à un seul institut)
+  // Libellés des instituts : code -> INSTITUT_nom le plus fréquent. Une cellule à plusieurs
+  // instituts est utilisée quand elle a autant de noms que de codes (appariés dans l'ordre).
   const compte = {};
-  for (const r of actions) if (r.institut && r.institut_nom && !r.institut.includes(",")) {
-    const code = squish(r.institut.replace(/\(.*\)/, ""));
-    (compte[code] = compte[code] || {})[r.institut_nom] = (compte[code][r.institut_nom] || 0) + 1;
+  for (const r of actions) if (r.institut && r.institut_nom) {
+    const codes = parties(r.institut).map(c => squish(c.replace(/\(.*\)/, "")));
+    const nomsCell = codes.length === 1 ? [r.institut_nom] : parties(r.institut_nom);
+    if (nomsCell.length !== codes.length) continue;
+    codes.forEach((c, i) => { const k = norm(c); (compte[k] = compte[k] || {})[nomsCell[i]] = (compte[k][nomsCell[i]] || 0) + 1; });
   }
-  const noms = {};
+  const noms = { ...(nomsRef || {}) };
   for (const [code, o] of Object.entries(compte)) noms[code] = Object.entries(o).sort((a, b) => b[1] - a[1])[0][0];
-  const lib = code => noms[code] || code;
+  const lib = code => (code != null && noms[norm(code)]) || code;
 
   // --- Financements
   let fins = [];
@@ -399,7 +419,7 @@ function preparer({ tA, tF, A, F }) {
   const ordreCat = Object.keys(mCat).sort((x, y) => mCat[y] - mCat[x]);
   const couleurCat = {}; ordreCat.forEach((c, i) => couleurCat[c] = PALETTE_CAT[i % PALETTE_CAT.length]);
 
-  return { tA, tF, actions, baseFin, baseInst, nonRapproches, sansFin, ecarts, messages, lib, ordreCat, couleurCat };
+  return { tA, tF, colsA: A.cols, colsF: F.cols, noms, actions, baseFin, baseInst, nonRapproches, sansFin, ecarts, messages, lib, ordreCat, couleurCat };
 }
 
 // ============================================================================
@@ -856,6 +876,15 @@ function bandeauEtat() {
   if (D.sansFin.length) e.append(h("details", {}, h("summary", { style: { color: "var(--doux)" } }, `${D.sansFin.length} action(s) sans financement (0 €)`),
     h("div", { class: "liste" }, D.sansFin.map(a => h("div", {}, `${a.action ?? "(vide)"} — ${a.cat ?? ""}`)))));
   for (const m of D.messages) e.append(" · " + m);
+  const codesFin = [...new Set(D.baseFin.map(f => f.financeur))].filter(c => c !== "DEI");
+  const sansNom = codesFin.filter(c => D.lib(c) === c);
+  e.append(" · ", h("details", {}, h("summary", { style: { color: sansNom.length ? "#9a5b00" : "var(--doux)" } },
+      sansNom.length ? `⚠ ${sansNom.length} institut(s) sans libellé (${sansNom.join(", ")})` : "Colonnes lues"),
+    h("div", { class: "liste", style: { background: "#fff", borderColor: "var(--ligne)" } },
+      h("b", {}, `Table ${D.tA}`), Object.entries(D.colsA).map(([r, c]) => h("div", {}, `${r} → ${c ?? "absente"}`)),
+      h("b", {}, `Table ${D.tF}`), Object.entries(D.colsF).map(([r, c]) => h("div", {}, `${r} → ${c ?? "absente"}`)),
+      h("b", {}, "Libellés des instituts"), Object.keys(D.noms).length ? Object.entries(D.noms).map(([k, v]) => h("div", {}, `${k} → ${v}`))
+        : h("div", {}, "aucun : vérifier la colonne INSTITUT_nom"))));
 }
 
 function afficher() {
@@ -883,7 +912,7 @@ async function demarrer(force) {
     try {
       const brut = await chargerDonnees(OPTIONS);
       D = preparer(brut);
-      document.getElementById("sous-titre").textContent = `Synthèse ${P.annee} — données Grist en direct`;
+      document.getElementById("sous-titre").textContent = `Synthèse ${P.annee} — données Grist en direct — version ${VERSION}`;
       bandeauEtat();
       afficher();
     } catch (err) {
