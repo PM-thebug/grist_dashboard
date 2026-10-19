@@ -117,7 +117,7 @@ tr.total td { font-weight: 700; background: #fff; border-top: 1px solid var(--li
 
 <script>
 "use strict";
-const VERSION = "5 oct. 2026 · v5 (INSTITUT_institut_nom)";
+const VERSION = "19 oct. 2026 · v7 (aligné sur le script R)";
 // ============================================================================
 // 1. PARAMÈTRES — mêmes règles que le script R synthese_actions_internationales.R
 // ============================================================================
@@ -134,13 +134,18 @@ const P = {
   },
   facultatives: ["institut", "institut_nom", "annee", "montant_norm"],
   instituts: ["IN2P3", "INC", "INEE", "INP", "INS2I", "INSB", "INSHS", "INSIS", "INSMI", "INSU"],
-  categorieOutils: "OUTILS CNRS",
+  categorieOutils: "OUTILS IR-x",
   categorieAfrique: "PLAN AFRIQUE",
   prefixeEnCours: "AAP",
   seuilsGlobal: { type_cat: 100000, pays_cat: 100000 },   // partie 1 (mêmes noms que dans R)
   seuilsFinanceurs: { defaut: 0 },
   seuilsDEI: { defaut: 0 },
   topPays: 20,
+  // Effectifs de chercheurs par institut (fixes) : servent uniquement à la normalisation.
+  // Si le document Grist contient une table avec les colonnes « institut » et « effectif »,
+  // ses valeurs remplacent celles-ci.
+  effectifs: { INSIS: 918, INSB: 2356, INSHS: 1665, INS2I: 599, INSU: 914,
+               IN2P3: 512, INC: 1444, INSMI: 421, INP: 1190, INEE: 698 },
   toleranceEcart: 1,               // contrôle : MONTANT (2026) = somme des financements (€)
   recodagePays: { "Egypte": "Égypte", "Hong-Kong": "Hong Kong", "Peru": "Pérou",
                   "Tunis": "Tunisie", "Tchéquie": "République Tchèque" },
@@ -323,13 +328,25 @@ async function chargerDonnees(options) {
     const cNom = cols.find(c => c.colId !== ri.visible && norm(c.label).includes("NOM")) || cols.find(c => c.colId !== ri.visible && norm(c.colId).includes("NOM"));
     if (cNom) t.id.forEach((_, i) => { const k = t[ri.visible][i], v = t[cNom.colId][i]; if (k && v && typeof v === "string") nomsRef[norm(k)] = squish(v); });
   }
-  return { tA, tF, A, F, nomsRef };
+  // Table des effectifs dans Grist (facultative)
+  let effectifs = { ...P.effectifs }, tEff = null;
+  for (const tid of listeTables) {
+    if (tid === tA || tid === tF) continue;
+    const cols = await colonnesDe(tid);
+    const ci = trouverColonne(cols, "institut"), ce = trouverColonne(cols, "effectif");
+    if (ci && ce && !/^Ref/.test(ce.type || "")) {
+      const vi = await valeurs(tid, ci), ve = await valeurs(tid, ce), lu = {};
+      vi.forEach((k, i) => { const n = enNombre(ve[i]); if (k && isFinite(n) && n > 0) lu[squish(k).toUpperCase()] = n; });
+      if (Object.keys(lu).length) { effectifs = lu; tEff = tid; break; }
+    }
+  }
+  return { tA, tF, A, F, nomsRef, effectifs, tEff };
 }
 
 // ============================================================================
 // 4. PRÉPARATION — reproduit la section 2 du script R
 // ============================================================================
-function preparer({ tA, tF, A, F, nomsRef }) {
+function preparer({ tA, tF, A, F, nomsRef, effectifs, tEff }) {
   const messages = [];
   // --- Actions
   let actions = [];
@@ -343,7 +360,7 @@ function preparer({ tA, tF, A, F, nomsRef }) {
       pays: nettoyer(A.pays[i]), secteur: nettoyer(A.secteur[i]), institut: nettoyer(A.institut[i]),
       institut_nom: nettoyer(A.institut_nom[i]) };
     r.cle = action == null ? null : squish(action).toUpperCase();
-    r.type_cat = r.type == null ? null : `${r.type} (${r.cat ?? "?"})`;
+    r.type_cat = r.type == null ? null : `${r.cat ?? "?"} - ${r.type}`;
     if (r.pays != null) {
       const p = [...new Set(parties(r.pays).map(x => P.recodagePays[x] || x))];
       r.pays = p.length ? p.join(P.sep) : null;
@@ -412,6 +429,8 @@ function preparer({ tA, tF, A, F, nomsRef }) {
     .map(e => ({ ...e, ecart: e.montant - e.fin })).filter(e => Math.abs(e.ecart) > P.toleranceEcart)
     .sort((x, y) => Math.abs(y.ecart) - Math.abs(x.ecart));
   const sansFin = actions.filter(a => !idsFinances.has(a.id));
+  // Financement propre d'un institut pour une action dont la colonne INSTITUT ne le mentionne pas
+  const horsPorteur = baseFin.filter(f => P.instituts.includes(f.financeur) && f.montant !== 0 && !codesInst(f.institut).includes(f.financeur));
 
   // Couleur fixe par catégorie (ordre du montant total des actions)
   const mCat = {};
@@ -419,7 +438,7 @@ function preparer({ tA, tF, A, F, nomsRef }) {
   const ordreCat = Object.keys(mCat).sort((x, y) => mCat[y] - mCat[x]);
   const couleurCat = {}; ordreCat.forEach((c, i) => couleurCat[c] = PALETTE_CAT[i % PALETTE_CAT.length]);
 
-  return { tA, tF, colsA: A.cols, colsF: F.cols, noms, actions, baseFin, baseInst, nonRapproches, sansFin, ecarts, messages, lib, ordreCat, couleurCat };
+  return { tA, tF, effectifs, tEff, colsA: A.cols, colsF: F.cols, noms, actions, baseFin, baseInst, nonRapproches, sansFin, ecarts, horsPorteur, messages, lib, ordreCat, couleurCat };
 }
 
 // ============================================================================
@@ -447,19 +466,39 @@ function dimension(rows, col, o = {}) {
   if (o.seuil != null) lignes = lignes.filter(e => e.montant > o.seuil);
   if (o.top) lignes = lignes.slice(0, o.top);
   if (lignes.length === 0) return null;
-  const nF = nFin(d);
-  const tuiles = [
-    tuile("Montant total", fmtCourt(totalM)),
-    tuile("Nombre d'actions en cours", fmtNombre(o.nUnivers ?? nTotal)),
-    tuile("Nombre d'actions financées", fmtNombre(o.nFinUnivers ?? nF), "montant > 0"),
-    tuile("Moyenne par action financée", fmtCourt(totalM / nF))
-  ];
-  if (o.seuil != null || o.top) tuiles.push(tuile(o.top ? `${o.quoi} affichés (top ${o.top})` : `${o.quoi} > ${fmtCourt(o.seuil)}`,
-    `${lignes.length} sur ${tout.length}`, `${fmtPart(somme(lignes, e => e.part))} du montant`));
-  else tuiles.push(tuile(o.quoi, fmtNombre(tout.length)));
-  tuiles.push(tuile("En tête", tout[0].lib, `${fmtPart(tout[0].part)} du montant`));
-  if (!o.sansTop3 && tout.length >= 4) tuiles.push(tuile("Part des 3 premiers", fmtPart(tout[0].part + tout[1].part + tout[2].part), "concentration du montant"));
+  // Indicateurs (tableau_dimension du script R, tuiles masquées retirées)
+  const filtre = !!(o.cats || o.sauf);
+  const nF = filtre ? nFin(df) : (o.nFinUnivers ?? nFin(d));
+  let tuiles;
+  if (o.deplier && col === "pays") tuiles = tuilesPays(d, rows, o);
+  else {
+    const libM = o.deplier && col === "secteur" ? "Montant (secteur renseigné)" : "Montant total";
+    tuiles = [
+      tuile(libM, fmtCourt(totalM), filtre ? `${fmtPart(totalM / somme(rows))} du budget international` : null),
+      filtre ? tuile("Nombre d'actions en cours", `${fmtNombre(distincts(df))} sur ${fmtNombre(o.nUnivers ?? distincts(rows))}`,
+                     `${fmtPart(distincts(df) / (o.nUnivers ?? distincts(rows)))} des actions`)
+             : tuile("Nombre d'actions en cours", fmtNombre(o.nUnivers ?? nTotal)),
+      tuile("Nombre d'actions financées", fmtNombre(nF), "montant > 0"),
+      tuile("Moyenne par action financée", fmtCourt(totalM / nFin(d)))
+    ];
+    if (o.deplier && col === "secteur") tuiles.splice(3, 0, tuile("Actions avec secteur renseigné", fmtNombre(nTotal)));
+  }
   return { lignes, tout, totalM, nTotal, tuiles, d };
+}
+
+// Tuiles des graphiques par pays : montant et actions AVEC PAYS rapportés au total (tuiles_pays du script R)
+function tuilesPays(d, df0, o) {
+  const m0 = somme(df0), n0 = o.nUnivers ?? distincts(df0), f0 = o.nFinUnivers ?? nFin(df0);
+  const m = somme(d), n = distincts(d), f = nFin(d);
+  return [tuile("Montant total des actions financées avec pays", fmtCourt(m), `sur ${fmtCourt(m0)} au total (${fmtPart(m / m0)})`),
+    tuile("Nombre d'actions en cours avec pays", fmtNombre(n), `sur ${fmtNombre(n0)} au total (${fmtPart(n / n0)})`),
+    tuile("Nombre d'actions financées avec pays", fmtNombre(f), `sur ${fmtNombre(f0)} financées (${fmtPart(f / f0)})`),
+    tuile("Moyenne par action financée", fmtCourt(m / f))];
+}
+// Libellé « CATÉGORIE - type » avec la catégorie en gras
+function libTypeCat(lib) {
+  const i = String(lib).indexOf(" - ");
+  return i < 0 ? lib : h("span", {}, h("b", {}, lib.slice(0, i)), lib.slice(i));
 }
 
 function seuilTxt(quoi, s) {
@@ -530,14 +569,15 @@ function hbarres(lignes, { couleur = C.bleuf, segments, valeur = l => l.montant,
   }));
 }
 
-function vbarres(lignes, { valeur = l => l.montant, couleur = l => C.bleuf } = {}) {
+function vbarres(lignes, { valeur = l => l.montant, couleur = l => C.bleuf, cadre = () => false } = {}) {
   const max = Math.max(...lignes.map(valeur), 0) || 1;
   return h("div", { class: "vdefil" }, h("div", { style: { minWidth: (lignes.length * 70) + "px" } },
     h("div", { class: "vbarres" }, lignes.map(l => {
       const c = couleur(l);
       return h("div", { class: "col", title: `${l.libAff ?? l.lib} — ${fmtEuro(valeur(l))}` },
         h("div", { class: "v" }, fmtCourt(valeur(l))),
-        h("div", { class: "b" + (CLAIRES.has(c) ? " clair" : ""), style: { height: (valeur(l) / max * 100) + "%", background: c } }));
+        h("div", { class: "b" + (CLAIRES.has(c) ? " clair" : ""), style: { height: (valeur(l) / max * 100) + "%", background: c,
+          outline: cadre(l) ? `3px solid ${C.violet}` : null, outlineOffset: cadre(l) ? "1px" : null } }));
     })),
     h("div", { class: "vlibs" }, lignes.map(l => h("div", { title: l.libAff ?? l.lib }, l.libAff ?? l.lib)))));
 }
@@ -573,15 +613,26 @@ const colsStd = [["", l => l.libAff ?? l.lib, "txt"], ["Montant", l => l.montant
   ["Montant moyen par action", l => l.montant / l.n, fmtEuro]];
 const totalStd = (r, lib = "Total général") => ({ lib, 1: fmtEuro(r.totalM), 2: fmtPart(1), 3: fmtNombre(r.nTotal), 4: fmtEuro(r.totalM / r.nTotal) });
 
-// Carte standard d'une dimension
+// Carte standard d'une dimension ; les pays sont en barres empilées par catégorie d'action
 function carteDimension(titre, rows, col, o = {}) {
   const r = dimension(rows, col, o);
-  const st = [o.sousTitre, seuilTxt(o.quoi, o.seuil)].filter(Boolean).join(" — ");
+  const estPays = col === "pays" && o.deplier;
+  const st = [o.sousTitre, seuilTxt(o.quoi, o.seuil), estPays ? "barres découpées par catégorie d'action" : null].filter(Boolean).join(" — ");
   if (!r) return carte(titre, st, h("p", { class: "vide" }, "Aucune donnée."));
   const t = r.tuiles.slice();
   if (o.tuileExtra) t.splice(1, 0, o.tuileExtra);
-  r.lignes.forEach(l => l.libAff = o.libelle ? o.libelle(l.lib) : l.lib);
-  return carte(titre, st, tuilesEl(t), hbarres(r.lignes, { couleur: o.couleur || C.bleuf }), o.apres ? o.apres(r) : null,
+  // type_cat : nouveau nœud à chaque lecture (le libellé sert au graphique et au tableau)
+  r.lignes.forEach(l => col === "type_cat" ? Object.defineProperty(l, "libAff", { get: () => libTypeCat(l.lib), configurable: true })
+    : l.libAff = o.libelle ? o.libelle(l.lib) : l.lib);
+  let graphe;
+  if (estPays) {
+    const comp = {};
+    for (const x of r.d) if (x.cat != null) (comp[x.pays] = comp[x.pays] || {})[x.cat] = (comp[x.pays][x.cat] || 0) + x.montant;
+    const cats = D.ordreCat.filter(c => r.lignes.some(l => (comp[l.lib] || {})[c]));
+    graphe = [hbarres(r.lignes, { segments: l => cats.map(c => ({ v: (comp[l.lib] || {})[c] || 0, c: D.couleurCat[c] || C.grisc, t: c })) }),
+      legendeCat(cats)];
+  } else graphe = hbarres(r.lignes, { couleur: o.couleur || C.bleuf });
+  return carte(titre, st, tuilesEl(t), graphe, o.apres ? o.apres(r) : null,
     tableau(r.lignes, colsStd, totalStd(r, o.libTotal)));
 }
 
@@ -595,56 +646,6 @@ function typesParCat(rows, cats) {
       const types = Object.keys(m).sort((a, b) => m[b] - m[a] || a.localeCompare(b));
       return h("div", {}, h("b", {}, ct), h("i", {}, types.join("  ·  ")));
     }));
-}
-
-// Pays : barres empilées par catégorie + 3 principaux types (tableau_pays_cat)
-function cartePaysCat(titre, rows, o) {
-  const d = deplier(rows, "pays");
-  if (!d.length) return carte(titre, null, h("p", { class: "vide" }, "Aucune donnée."));
-  const r = dimension(d, "pays", {});
-  const garde = o.seuil == null ? r.tout : r.tout.filter(l => l.montant > o.seuil);
-  const comp = {}, types = {};
-  for (const x of d) {
-    (comp[x.pays] = comp[x.pays] || {})[x.cat || "?"] = (comp[x.pays][x.cat || "?"] || 0) + x.montant;
-    if (x.type) (types[x.pays] = types[x.pays] || {})[x.type] = (types[x.pays][x.type] || 0) + x.montant;
-  }
-  garde.forEach(l => l.types = Object.entries(types[l.lib] || {}).sort((a, b) => b[1] - a[1]).slice(0, 3)
-    .map(([t, m]) => `${t} ${fmtK(m)}`).join(" ; "));
-  const cats = D.ordreCat.filter(c => garde.some(l => comp[l.lib][c]));
-  const tu = [tuile("Montant total", fmtCourt(r.totalM)),
-    tuile("Nombre d'actions en cours", fmtNombre(o.nUnivers ?? r.nTotal)),
-    tuile("Nombre d'actions financées", fmtNombre(o.nFinUnivers ?? nFin(d)), "montant > 0"),
-    tuile("Nombre d'actions avec pays renseigné", fmtNombre(r.nTotal)),
-    tuile(o.seuil == null ? "Pays" : `Pays > ${fmtCourt(o.seuil)}`, `${garde.length} sur ${r.tout.length}`,
-      `${fmtPart(somme(garde, l => l.part))} du montant`),
-    garde.length ? tuile("En tête", garde[0].lib, `${fmtPart(garde[0].part)} du montant`) : null];
-  return carte(titre, ["Toutes les actions — barres découpées par catégorie", seuilTxt("Pays", o.seuil)].filter(Boolean).join(" — "),
-    tuilesEl(tu),
-    hbarres(garde, { segments: l => cats.map(c => ({ v: comp[l.lib][c] || 0, c: D.couleurCat[c] || C.grisc, t: c })) }),
-    legendeCat(cats),
-    tableau(garde, [["", l => l.lib, "txt"], ["Montant", l => l.montant, fmtEuro], ["Part du montant", l => l.part, fmtPart],
-      ["Nombre d'actions", l => l.n, fmtNombre], ["Principaux types d'action", l => l.types, "txt"]],
-      { lib: "Total général (tous pays)", 1: fmtEuro(r.totalM), 2: fmtPart(1), 3: fmtNombre(r.nTotal) }));
-}
-
-// Secteur × catégorie (barres empilées)
-function carteSecteurCat(titre, rows, o) {
-  const d = deplier(rows, "secteur").filter(r => r.cat != null);
-  const sansSect = rows.filter(r => r.secteur == null);
-  let st = "Toutes les actions, sans filtre de catégorie";
-  if (sansSect.length) st += ` — ${distincts(sansSect)} action(s) sans secteur renseigné non représentée(s) (${fmtCourt(somme(sansSect))})`;
-  if (!d.length) return carte(titre, st, h("p", { class: "vide" }, "Aucune donnée."));
-  const r = dimension(d, "secteur", {});
-  const comp = {};
-  for (const x of d) (comp[x.secteur] = comp[x.secteur] || {})[x.cat] = (comp[x.secteur][x.cat] || 0) + x.montant;
-  const cats = D.ordreCat.filter(c => d.some(x => x.cat === c));
-  return carte(titre, st,
-    tuilesEl([tuile("Montant total", fmtCourt(r.totalM)), tuile("Nombre d'actions en cours", fmtNombre(o.nUnivers ?? r.nTotal)),
-      tuile("Nombre d'actions financées", fmtNombre(o.nFinUnivers ?? nFin(d)), "montant > 0"),
-      tuile("Secteurs", fmtNombre(r.tout.length)), tuile("En tête", r.tout[0].lib, `${fmtPart(r.tout[0].part)} du montant`)]),
-    hbarres(r.tout, { segments: l => cats.map(c => ({ v: comp[l.lib][c] || 0, c: D.couleurCat[c] || C.grisc, t: c })) }),
-    legendeCat(cats),
-    tableau(r.tout, [["", l => l.lib, "txt"], ...cats.map(c => [c, l => comp[l.lib][c] || 0, fmtEuro]), ["Total", l => l.montant, fmtEuro]]));
 }
 
 // Par financeur (instituts : fonds propres ; DEI : total) — barres verticales
@@ -662,8 +663,7 @@ function carteFinanceur(titre, fin, nActions, seuil) {
   return carte(titre, ["Instituts : fonds propres ; DEI : total de ses financements", seuilTxt("Financeurs", seuil)].filter(Boolean).join(" — "),
     tuilesEl([tuile("Montant total", fmtCourt(tot)), tuile("Nombre d'actions en cours", fmtNombre(nActions)),
       tuile("Nombre d'actions financées", fmtNombre(nF), "montant > 0"), tuile("Moyenne par action financée", fmtCourt(tot / nF)),
-      tuile("dont DEI", fmtCourt(dei), `${fmtPart(dei / tot)} du montant`, "jaune"), tuile("Financeurs", fmtNombre(tous.length), "instituts et DEI"),
-      tuile("En tête", tous[0].libAff, `${fmtPart(tous[0].part)} du montant`)]),
+      tuile("dont DEI", fmtCourt(dei), `${fmtPart(dei / tot)} du montant`, "jaune")]),
     vbarres(lignes, { couleur: l => l.lib === "DEI" ? C.jaune : C.bleuf }),
     tableau(lignes, [["", l => l.libAff, "txt"], ["Montant", l => l.montant, fmtEuro], ["Part du montant", l => l.part, fmtPart],
       ["Actions financées", l => l.n, fmtNombre]], { lib: "Total général", 1: fmtEuro(tot), 2: fmtPart(1), 3: fmtNombre(nF) }));
@@ -673,53 +673,44 @@ function carteFinanceur(titre, fin, nActions, seuil) {
 function carteInstitut(titre, fin) {
   const g = {};
   for (const f of fin.filter(f => P.instituts.includes(f.financeur))) {
-    const e = g[f.financeur] = g[f.financeur] || { lib: f.financeur, montant: 0, norm: 0, normOk: false };
-    e.montant += f.montant; if (isFinite(f.montant_norm)) { e.norm += f.montant_norm; e.normOk = true; }
+    const e = g[f.financeur] = g[f.financeur] || { lib: f.financeur, montant: 0 };
+    e.montant += f.montant;
   }
-  const lignes = Object.values(g);
-  if (!lignes.length || !lignes.some(l => l.normOk))
-    return carte(titre, null, h("p", { class: "vide" }, "Colonne « Montant par effectif de 1000 chercheurs » vide : graphique normalisé indisponible."));
-  lignes.forEach(l => { l.eff = l.norm ? l.montant / l.norm * 1000 : NaN; l.libAff = D.lib(l.lib); });
+  // Effectifs fixes (table Grist « effectifs » ou valeurs des paramètres)
+  const lignes = Object.values(g).filter(l => D.effectifs[l.lib] > 0);
+  if (!lignes.length)
+    return carte(titre, null, h("p", { class: "vide" }, "Aucun effectif disponible : graphique normalisé indisponible."));
+  lignes.forEach(l => { l.eff = D.effectifs[l.lib]; l.norm = l.montant / l.eff * 1000; l.libAff = D.lib(l.lib); });
   const reel = lignes.slice().sort((a, b) => b.montant - a.montant);
   const nor = lignes.slice().sort((a, b) => b.norm - a.norm);
   const effTot = somme(lignes.filter(l => isFinite(l.eff)), l => l.eff), totM = somme(lignes);
-  return carte(titre, "D'après DEI-FINANCEMENTS : fonds propres des instituts ; effectif déduit du montant normalisé",
+  return carte(titre, `D'après DEI-FINANCEMENTS : fonds propres des instituts ; effectifs ${D.tEff ? "de la table " + D.tEff : "fixes (paramètres du widget)"}`,
     tuilesEl([tuile("Montant total instituts", fmtCourt(totM)), tuile("Effectif total", fmtNombre(effTot), "chercheurs"),
-      tuile("Moyenne pour 1000 chercheurs", fmtCourt(totM / effTot * 1000)),
-      tuile("1er en montant réel", reel[0].libAff, fmtCourt(reel[0].montant)), tuile("1er pour 1000 chercheurs", nor[0].libAff, fmtCourt(nor[0].norm))]),
+      tuile("Moyenne pour 1000 chercheurs", fmtCourt(totM / effTot * 1000))]),
     vdouble(reel, [{ nom: "Montant réel", val: l => l.montant, c: C.bleuf }, { nom: "Montant pour 1000 chercheurs", val: l => l.norm, c: C.bleuc }]),
     tableau(reel, [["", l => l.libAff, "txt"], ["Montant réel", l => l.montant, fmtEuro],
       ["Effectif chercheurs", l => l.eff, v => isFinite(v) ? fmtNombre(v) : "—"], ["Montant pour 1000 chercheurs", l => l.norm, fmtEuro]]));
 }
 
-// Financement DEI attribué aux instituts
-function carteDeiInst(titre, inst, avecRepartition) {
+// Financement DEI attribué aux instituts (tableau_dei_inst du script R) ; cadre = code de
+// l'institut mis en évidence (série d'un institut)
+function carteDeiInst(titre, inst, cadre) {
   const d = inst.filter(r => r.origine !== "Institut");
   const att = d.filter(r => r.origine === "DEI attribué");
-  if (!d.length) return carte(titre, null, h("p", { class: "vide" }, "Aucun financement DEI."));
-  const total = somme(d), attribue = somme(att);
-  const enCours = somme(d.filter(r => r.origine === "DEI en cours d'attribution"));
-  const transv = somme(d.filter(r => r.origine === "DEI transverse"));
+  if (!att.length) return carte(titre, null, h("p", { class: "vide" }, "Aucun financement DEI attribué."));
+  const total = somme(d), attribue = somme(att), nAtt = nFin(att);
   const g = {};
   for (const r of att) { const e = g[r.benef] = g[r.benef] || { lib: r.benef, montant: 0, ids: new Set() }; e.montant += r.montant; if (r.montant > 0) e.ids.add(r.id); }
   const lignes = Object.values(g).map(e => ({ ...e, libAff: D.lib(e.lib), part: e.montant / attribue, n: e.ids.size })).sort((a, b) => b.montant - a.montant);
-  const rep = avecRepartition ? h("div", { style: { margin: "4px 0 14px" } },
-    hbarres([{ lib: "Montant DEI", montant: total }], { segments: () => [
-      { v: attribue, c: C.jaune, t: "Attribué aux instituts" }, { v: enCours, c: C.orange, t: "En cours d'attribution" },
-      { v: transv, c: C.bleuc, t: "Transverse" }] }),
-    h("div", { class: "legende" }, [["Attribué aux instituts", C.jaune], ["En cours d'attribution", C.orange], ["Transverse", C.bleuc]]
-      .map(([l, c]) => h("span", { style: { "--c": c, "--b": C.bleuf } }, l)))) : null;
-  return carte(titre, `Actions rattachées à un institut (colonne INSTITUT ; plusieurs : parts égales) — sans institut : catégories ${P.prefixeEnCours}… = en cours d'attribution, autres = transverse`,
+  return carte(titre, cadre ? `Focus : ${D.lib(cadre)}` : `Actions rattachées à un institut (colonne INSTITUT ; plusieurs : parts égales) — sans institut : catégories ${P.prefixeEnCours}… = en cours d'attribution, autres = transverse`,
     tuilesEl([tuile("Montant total DEI", fmtCourt(total)),
-      tuile("Attribué aux instituts", fmtCourt(attribue), `${fmtPart(attribue / total)} du montant DEI`, "jaune"),
-      tuile("En cours d'attribution", fmtCourt(enCours), `${fmtPart(enCours / total)} du montant DEI`),
-      tuile("Montant transverse", fmtCourt(transv), `${fmtPart(transv / total)} du montant DEI`),
-      tuile("Nombre d'actions financées DEI", fmtNombre(nFin(d))),
-      lignes.length ? tuile("En tête", lignes[0].libAff, `${fmtPart(lignes[0].part)} du montant attribué`) : null]),
-    rep, lignes.length ? vbarres(lignes, { couleur: () => C.jaune }) : h("p", { class: "vide" }, "Aucun montant attribué."),
+      tuile("Montant DEI fléché instituts", fmtCourt(attribue), `${fmtPart(attribue / total)} du montant DEI`, "jaune"),
+      tuile("Nombre d'actions financées", fmtNombre(nAtt), `fléchées instituts, sur ${fmtNombre(nFin(d))} actions DEI`),
+      tuile("Moyenne par action", fmtCourt(attribue / nAtt), "montant fléché / actions fléchées")]),
+    vbarres(lignes, { couleur: () => C.jaune, cadre: l => l.lib === cadre }),
     tableau(lignes, [["", l => l.libAff, "txt"], ["Montant DEI attribué", l => l.montant, fmtEuro],
       ["Part du montant attribué", l => l.part, fmtPart], ["Actions financées", l => l.n, fmtNombre]],
-      { lib: "Total général", 1: fmtEuro(attribue), 2: fmtPart(1), 3: fmtNombre(nFin(att)) }));
+      { lib: "Total général", 1: fmtEuro(attribue), 2: fmtPart(1), 3: fmtNombre(nAtt) }));
 }
 
 const enTete = (rows, col, dep) => {
@@ -747,16 +738,19 @@ function vueGlobale() {
         tuile("Financement DEI", fmtCourt(dei), `${fmtPart(dei / somme(fin))} des financements`, "jaune"),
         tuile("1re catégorie", c1.lib, `${fmtPart(c1.part)} du montant`),
         tuile("1er type d'action", t1.lib, `${fmtPart(t1.part)} du montant`),
-        tuile("1er institut (DEI incluse)", D.lib(i1.lib), `${fmtPart(i1.part)} du montant`)], true)]),
+        tuile("1er institut (DEI incluse)", D.lib(i1.lib), `${fmtPart(i1.montant / somme(fin))} des financements`)], true)]),
     carteDimension("Par catégorie d'action", act, "cat", { ...base, quoi: "Catégories", seuil: S.categorie,
       apres: r => typesParCat(act, r.lignes.map(l => l.lib)) }),
-    carteDimension("Par type d'action (catégorie)", act, "type_cat", { ...base, quoi: "Types d'action", seuil: S.type_cat, libTotal: "Total général (tous types)" })
+    carteDimension("Par type d'action", act, "type_cat", { ...base, quoi: "Types d'action", seuil: S.type_cat, libTotal: "Total général (tous types)" }),
+    carteDimension(`Par type d'action — ${P.categorieOutils}`, act, "type", { ...base, quoi: "Types d'action", cats: [P.categorieOutils],
+      libTotal: "Total général (tous types)", sousTitre: `Actions de la catégorie ${P.categorieOutils}` }),
+    carteDimension("Par pays", act, "pays", { ...base, deplier: true, quoi: "Pays", seuil: S.pays_cat, libTotal: "Total général (tous pays)",
+      sousTitre: "Toutes les actions" })
   ];
-  cartes.push(cartePaysCat("Par pays (catégories et types d'action)", act, { ...base, seuil: S.pays_cat }));
   const large = el => { el.classList.add("large"); return el; };
   cartes.push(large(carteFinanceur("Par financeur (instituts et DEI)", fin, nA, S.financeur_inst)),
     large(carteInstitut("Par institut CNRS : réel et normalisé pour 1000 chercheurs", fin)),
-    large(carteDeiInst("Financement DEI attribué aux instituts", inst, true)));
+    large(carteDeiInst("Financement DEI attribué aux instituts", inst)));
   return cartes;
 }
 
@@ -779,53 +773,67 @@ function univers(f) {
   }
   return d;
 }
+// Indicateurs d'un financeur (tuiles_fiche du script R) ; parts calculées sur le budget
+// international (montant des actions) et sur le montant propre du financeur
+function indicateursFinanceur(f) {
+  const d = univers(f), propre = somme(d), nf = nFin(d);
+  const budget = somme(D.actions);
+  const outils = somme(d.filter(x => dansCats(x.cat, [P.categorieOutils])));
+  const dd = D.baseInst.filter(x => x.origine === "DEI attribué" && x.benef === f);
+  const deiAtt = somme(dd), total = propre + deiAtt;
+  return { d, dd, propre, nf, budget, outils, deiAtt, total, nC: distincts(d),
+    pays: enTete(d, "pays", true), type: enTete(d, "type"), sect: enTete(d, "secteur", true) };
+}
 function syntheseFinanceurs() {
-  const totFin = somme(D.baseFin);
   const lignes = financeurs().map(f => {
-    const d = univers(f), m = somme(d), nf = nFin(d);
-    const outils = somme(d.filter(x => x.cat === P.categorieOutils));
-    const dd = D.baseInst.filter(x => x.origine === "DEI attribué" && x.benef === f);
-    const pays = enTete(d, "pays", true), type = enTete(d, "type");
-    return { lib: f, libAff: D.lib(f), montant: m, part: m / totFin, nC: distincts(d), nF: nf, moy: m / nf, outils: outils / m,
-      dei: f === "DEI" ? NaN : somme(dd), nPays: pays.n, pays1: pays.lib, type1: type.lib };
+    const I = indicateursFinanceur(f), estDEI = f === "DEI";
+    return { lib: f, libAff: D.lib(f), montant: I.propre, dei: estDEI ? NaN : I.deiAtt, total: estDEI ? NaN : I.total,
+      part: I.propre / I.budget, nC: I.nC, nF: I.nf, moy: I.propre / I.nf, outils: I.outils / I.propre,
+      nPays: I.pays.n, pays1: I.pays.lib, type1: I.type.lib };
   }).sort((a, b) => b.montant - a.montant);
+  const eur = v => isFinite(v) ? fmtEuro(v) : "—";
   return carteBrute("carte large", `Indicateurs clés ${P.annee} — comparaison des financeurs`,
     "D'après DEI-FINANCEMENTS ; actions en cours = actions financées + actions portées non financées", [
     hbarres(lignes, { couleur: C.bleuf, segments: l => [{ v: l.montant, c: l.lib === "DEI" ? C.jaune : C.bleuf }] }),
-    tableau(lignes, [["", l => l.libAff, "txt"], ["Montant financé", l => l.montant, fmtEuro], ["Part des financements", l => l.part, fmtPart],
+    tableau(lignes, [["", l => l.libAff, "txt"], ["Montant propre", l => l.montant, fmtEuro],
+      ["Montant attribué par la DEI", l => l.dei, eur], ["Montant total (propre + DEI)", l => l.total, eur],
+      ["Part du budget international", l => l.part, fmtPart],
       ["Actions en cours", l => l.nC, fmtNombre], ["Actions financées", l => l.nF, fmtNombre], ["Montant moyen par action financée", l => l.moy, fmtEuro],
-      [`Part ${P.categorieOutils}`, l => l.outils, fmtPart], ["Financement DEI attribué", l => l.dei, v => isFinite(v) ? fmtEuro(v) : "—"],
+      [`Part ${P.categorieOutils}`, l => l.outils, fmtPart],
       ["Pays concernés", l => l.nPays, fmtNombre], ["1er pays", l => l.pays1, "txt"], ["1er type d'action", l => l.type1, "txt"]])]);
 }
 function serieFinanceur(f, avecSynthese) {
-  const d = univers(f), nU = distincts(d), nFU = nFin(d);
+  const I = indicateursFinanceur(f), d = I.d, dd = I.dd;
+  const nU = I.nC, nFU = I.nf, m = I.propre;
   const estDEI = f === "DEI";
   const S = estDEI ? P.seuilsDEI : P.seuilsFinanceurs;
   const s = nom => S[nom] ?? S.defaut;
-  const dd = D.baseInst.filter(x => x.origine === "DEI attribué" && x.benef === f);
-  const totFin = somme(D.baseFin), m = somme(d), nf = nFin(d);
-  const outils = somme(d.filter(x => x.cat === P.categorieOutils));
-  const pays = enTete(d, "pays", true), type = enTete(d, "type"), sect = enTete(d, "secteur", true);
+  const nDD = nFin(dd);
+  const tMontant = estDEI
+    ? [tuile("Montant", fmtCourt(m), `${fmtPart(m / I.budget)} du budget international`)]
+    : [tuile("Montant propre", fmtCourt(m), `${fmtPart(m / I.budget)} du budget international`),
+       tuile("Montant attribué par la DEI", fmtCourt(I.deiAtt), `${fmtNombre(nDD)} actions`, "jaune"),
+       tuile("Montant total (propre + DEI)", fmtCourt(I.total), `dont ${fmtPart(I.deiAtt / I.total)} attribué par la DEI`)];
   const attTot = somme(D.baseInst.filter(x => x.origine === "DEI attribué"));
-  const tDei = estDEI ? tuile("Attribué aux instituts", fmtCourt(attTot), `${fmtPart(attTot / m)} du montant DEI`, "jaune")
-    : tuile("Financement DEI attribué", fmtCourt(somme(dd)), `${fmtNombre(nFin(dd))} actions`, "jaune");
-  const extra = estDEI ? null : tuile("Montant alloué par la DEI", fmtCourt(somme(dd)), `${fmtNombre(nFin(dd))} actions`, "jaune");
-  const base = { nUnivers: nU, nFinUnivers: nFU, sansTop3: true, tuileExtra: extra };
+  const extra = estDEI ? null : tuile("Montant attribué par la DEI", fmtCourt(I.deiAtt), `${fmtNombre(nDD)} actions`, "jaune");
+  const base = { nUnivers: nU, nFinUnivers: nFU, tuileExtra: extra };
   const lib = D.lib(f);
+  const pct = v => `${fmtPart(v / m)} du montant`;
   const cartes = [];
   if (avecSynthese) cartes.push(syntheseFinanceurs());
   cartes.push(carteBrute("carte large", `${lib} — indicateurs clés ${P.annee}`, "D'après DEI-FINANCEMENTS", [
-      tuilesEl([tuile("Montant", fmtCourt(m), `${fmtPart(m / totFin)} des financements`), tuile("Nombre d'actions en cours", fmtNombre(nU)),
-        tuile("Nombre d'actions financées", fmtNombre(nf), "montant > 0"), tuile("Moyenne par action financée", fmtCourt(m / nf)),
-        tuile(`Part ${P.categorieOutils}`, fmtPart(outils / m), fmtCourt(outils)), tDei,
-        tuile("Pays concernés", fmtNombre(pays.n), "toutes actions"), tuile("1er pays", pays.lib, `${fmtCourt(pays.montant)} — ${fmtPart(pays.part)} du montant`),
-        tuile("1er type d'action", type.lib, `${fmtPart(type.part)} du montant`), tuile("1er secteur DEI", sect.lib, `${fmtPart(sect.part)} du montant`)], true)]),
+      tuilesEl([...tMontant, tuile("Nombre d'actions en cours", fmtNombre(nU)),
+        tuile("Nombre d'actions financées", fmtNombre(I.nf), "montant > 0"), tuile("Moyenne par action financée", fmtCourt(m / I.nf)),
+        tuile(`Part ${P.categorieOutils}`, fmtPart(I.outils / m), "du montant propre"),
+        estDEI ? tuile("Montant DEI fléché instituts", fmtCourt(attTot), `${fmtPart(attTot / m)} du montant DEI`, "jaune") : null,
+        tuile("Pays concernés", fmtNombre(I.pays.n), "toutes actions"),
+        tuile("1er pays", I.pays.lib, `${fmtCourt(I.pays.montant)} — ${pct(I.pays.montant)}`),
+        tuile("1er type d'action", I.type.lib, pct(I.type.montant)), tuile("1er secteur DEI", I.sect.lib, pct(I.sect.montant))], true)]),
     carteDimension(`${lib} — par catégorie d'action`, d, "cat", { ...base, quoi: "Catégories", seuil: s("categorie"),
       apres: r => typesParCat(d, r.lignes.map(l => l.lib)) }),
-    carteDimension(`${lib} — par type d'action (catégorie)`, d, "type_cat", { ...base, quoi: "Types d'action", seuil: s("type_cat"), libTotal: "Total général (tous types)" }),
+    carteDimension(`${lib} — par type d'action`, d, "type_cat", { ...base, quoi: "Types d'action", seuil: s("type_cat"), libTotal: "Total général (tous types)" }),
     carteDimension(`${lib} — par secteur géographique DEI`, d, "secteur", { ...base, deplier: true, quoi: "Secteurs", seuil: s("secteur_total"),
       sousTitre: "Toutes les actions, sans filtre de catégorie" }),
-    carteSecteurCat(`${lib} — par secteur géographique DEI et catégorie d'action`, d, { nUnivers: nU, nFinUnivers: nFU }),
     carteDimension(`${lib} — par pays, toutes actions`, d, "pays", { ...base, deplier: true, quoi: "Pays", seuil: s("pays_tout"), top: P.topPays,
       libTotal: "Total général (tous pays)", sousTitre: `Toutes les actions, sans filtre de catégorie — ${P.topPays} premiers pays en montant` }));
   if (estDEI) cartes.push(
@@ -834,13 +842,13 @@ function serieFinanceur(f, avecSynthese) {
     carteDimension(`${lib} — par pays, autres actions`, d, "pays", { ...base, deplier: true, quoi: "Pays", seuil: s("pays_autres"),
       sauf: [P.categorieAfrique], libTotal: "Total général (tous pays)", sousTitre: `Toutes les actions hors ${P.categorieAfrique}` }));
   if (!estDEI && dd.length) {
-    const b2 = { nUnivers: distincts(dd), nFinUnivers: nFin(dd), sansTop3: true, couleur: C.jaune, seuil: 0 };
+    const b2 = { nUnivers: distincts(dd), nFinUnivers: nDD, couleur: C.jaune, seuil: 0 };
     const l2 = `${lib} — financement DEI attribué`;
     cartes.push(
-      carteDimension(`${l2} — par catégorie d'action`, dd, "cat", { ...b2, quoi: "Catégories", apres: r => typesParCat(dd, r.lignes.map(l => l.lib)) }),
-      carteDimension(`${l2} — par type d'action (catégorie)`, dd, "type_cat", { ...b2, quoi: "Types d'action", libTotal: "Total général (tous types)" }),
-      carteDimension(`${l2} — par pays, toutes actions`, dd, "pays", { ...b2, deplier: true, quoi: "Pays", top: P.topPays, libTotal: "Total général (tous pays)",
-        sousTitre: `Toutes les actions — ${P.topPays} premiers pays en montant` }));
+      carteDimension(`${l2} — par type d'action`, dd, "type_cat", { ...b2, quoi: "Types d'action", libTotal: "Total général (tous types)" }),
+      carteDimension(`${l2} — par pays`, dd, "pays", { ...b2, deplier: true, quoi: "Pays", top: P.topPays, libTotal: "Total général (tous pays)",
+        sousTitre: `Toutes les actions — ${P.topPays} premiers pays en montant` }),
+      (c => { c.classList.add("large"); return c; })(carteDeiInst("Financement DEI attribué aux instituts", D.baseInst, f)));
   }
   return cartes;
 }
@@ -873,6 +881,10 @@ function bandeauEtat() {
   else e.append("✓ montants des actions = sommes des financements · ");
   if (D.nonRapproches.length) e.append(h("details", {}, h("summary", {}, `⚠ ${D.nonRapproches.length} financement(s) sans action correspondante, écarté(s) (${fmtCourt(somme(D.nonRapproches))})`),
     h("div", { class: "liste" }, D.nonRapproches.map(f => h("div", {}, `${f.action ?? "(vide)"} — ${f.source} — ${fmtEuro(f.montant)}`)))), " · ");
+  if (D.horsPorteur.length) e.append(h("details", {}, h("summary", { style: { color: "#9a5b00" } },
+      `⚠ ${D.horsPorteur.length} financement(s) d'un institut pour une action qu'il ne porte pas (${fmtCourt(somme(D.horsPorteur))})`),
+    h("div", { class: "liste" }, D.horsPorteur.map(f => h("div", {},
+      `${f.action ?? "(vide)"} — INSTITUT : ${f.institut ?? "(vide)"} — Source : ${f.source} — ${fmtEuro(f.montant)}`)))), " · ");
   if (D.sansFin.length) e.append(h("details", {}, h("summary", { style: { color: "var(--doux)" } }, `${D.sansFin.length} action(s) sans financement (0 €)`),
     h("div", { class: "liste" }, D.sansFin.map(a => h("div", {}, `${a.action ?? "(vide)"} — ${a.cat ?? ""}`)))));
   for (const m of D.messages) e.append(" · " + m);
