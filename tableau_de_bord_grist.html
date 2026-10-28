@@ -7,6 +7,8 @@
 <!-- API des widgets personnalisés Grist (servie par docs.getgrist.com ; sur une instance
      auto-hébergée, on peut la remplacer par https://<votre-instance>/grist-plugin-api.js) -->
 <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<!-- Capture des graphiques en image PNG -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <style>
 :root {
   --jaune: #FFEB6E; --bleuf: #00284b; --grisc: #ebf0f5; --grisf: #8296a5;
@@ -73,6 +75,10 @@ main { padding: 12px 16px 32px; display: grid; gap: 14px; grid-template-columns:
 .btn-plein { flex: none; border: 1px solid var(--ligne); background: #fff; color: var(--texte); border-radius: 6px; width: 30px; height: 28px;
   cursor: pointer; font-size: 15px; line-height: 1; }
 .btn-plein:hover { border-color: var(--grisf); }
+.btn-dl { flex: none; border: 1px solid var(--ligne); background: #fff; color: var(--texte); border-radius: 6px; height: 28px;
+  padding: 0 8px; cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.btn-dl:hover { border-color: var(--grisf); }
+.entete .actions { display: flex; gap: 6px; flex: none; }
 .carte.plein { position: fixed; inset: 0; z-index: 50; border-radius: 0; overflow: auto; padding: 20px 28px; }
 .carte.plein .vbarres { height: 55vh; }
 .carte.plein .hbarres .piste { height: 20px; }
@@ -117,7 +123,7 @@ tr.total td { font-weight: 700; background: #fff; border-top: 1px solid var(--li
 
 <script>
 "use strict";
-const VERSION = "19 oct. 2026 · v7 (aligné sur le script R)";
+const VERSION = "27 oct. 2026 · v9 (thématiques OpenAlex)";
 // ============================================================================
 // 1. PARAMÈTRES — mêmes règles que le script R synthese_actions_internationales.R
 // ============================================================================
@@ -128,11 +134,14 @@ const P = {
   colonnes: {
     actions: { action: "ACTION", montant: "MONTANT (2026)", categorie: "CATEGORIE D'ACTION",
                type: "TYPE D'ACTION", pays: "PAYS", secteur: "SECTEUR DEI",
-               institut: "INSTITUT", institut_nom: ["INSTITUT_institut_nom", "INSTITUT_nom"] },
+               institut: "INSTITUT", institut_nom: ["INSTITUT_institut_nom", "INSTITUT_nom"],
+               // Classement thématique OpenAlex (topic principal) — facultatif
+               oa_subfield: "OA_subfield", oa_field: ["OA_field", "$OA_field"], oa_domain: "OA_domain" },
     financements: { action: "Action", source: "Source", annee: "Année", montant: "Montant prévu",
                     montant_norm: "Montant par effectif de 1000 chercheurs" }
   },
-  facultatives: ["institut", "institut_nom", "annee", "montant_norm"],
+  facultatives: ["institut", "institut_nom", "annee", "montant_norm", "oa_subfield", "oa_field", "oa_domain"],
+  topThematiques: 20,              // graphique thématique : subfields affichés (les premiers en montant)
   instituts: ["IN2P3", "INC", "INEE", "INP", "INS2I", "INSB", "INSHS", "INSIS", "INSMI", "INSU"],
   categorieOutils: "OUTILS IR-x",
   categorieAfrique: "PLAN AFRIQUE",
@@ -264,8 +273,10 @@ async function valeurs(tab, col) {
   let ref = null;
   const m = /^Ref(List)?:(.+)$/.exec(col.type || "");
   if (m && col.visibleCol && col.visibleCol.colId) {
-    const cible = await table(m[2]);
-    ref = new Map(cible.id.map((id, i) => [id, cible[col.visibleCol.colId][i]]));
+    try {
+      const cible = await table(m[2]);
+      ref = new Map(cible.id.map((id, i) => [id, cible[col.visibleCol.colId][i]]));
+    } catch (e) { throw new Error(`La table référencée « ${m[2]} » (colonne ${col.label}) n'est pas lisible : elle doit rester visible pour les lecteurs du tableau de bord.`); }
   }
   const un = v => (ref && typeof v === "number") ? (ref.get(v) ?? null) : v;
   return brut.map(v => {
@@ -285,7 +296,7 @@ async function chargerDonnees(options) {
   async function choisir(role, obligatoires) {
     if (options[role] && listeTables.includes(options[role])) return options[role];
     for (const tid of listeTables) {
-      const cols = await colonnesDe(tid);
+      let cols; try { cols = await colonnesDe(tid); } catch (e) { continue; }   // table masquée par les règles d'accès
       if (obligatoires.every(l => trouverColonne(cols, l))) return tid;
     }
     return null;
@@ -322,23 +333,23 @@ async function chargerDonnees(options) {
   // Référence) : colonne affichée = code, autre colonne contenant « NOM » = libellé
   let nomsRef = {};
   const ri = A.ref.institut;
-  if (ri && ri.visible) {
+  if (ri && ri.visible) try {
     const t = await table(ri.table);
     const cols = await colonnesDe(ri.table);
     const cNom = cols.find(c => c.colId !== ri.visible && norm(c.label).includes("NOM")) || cols.find(c => c.colId !== ri.visible && norm(c.colId).includes("NOM"));
     if (cNom) t.id.forEach((_, i) => { const k = t[ri.visible][i], v = t[cNom.colId][i]; if (k && v && typeof v === "string") nomsRef[norm(k)] = squish(v); });
-  }
+  } catch (e) { /* table des instituts masquée : libellés lus dans la table des actions */ }
   // Table des effectifs dans Grist (facultative)
   let effectifs = { ...P.effectifs }, tEff = null;
   for (const tid of listeTables) {
     if (tid === tA || tid === tF) continue;
-    const cols = await colonnesDe(tid);
+    let cols; try { cols = await colonnesDe(tid); } catch (e) { continue; }   // table masquée
     const ci = trouverColonne(cols, "institut"), ce = trouverColonne(cols, "effectif");
-    if (ci && ce && !/^Ref/.test(ce.type || "")) {
+    if (ci && ce && !/^Ref/.test(ce.type || "")) try {
       const vi = await valeurs(tid, ci), ve = await valeurs(tid, ce), lu = {};
       vi.forEach((k, i) => { const n = enNombre(ve[i]); if (k && isFinite(n) && n > 0) lu[squish(k).toUpperCase()] = n; });
       if (Object.keys(lu).length) { effectifs = lu; tEff = tid; break; }
-    }
+    } catch (e) { /* table masquée */ }
   }
   return { tA, tF, A, F, nomsRef, effectifs, tEff };
 }
@@ -358,7 +369,8 @@ function preparer({ tA, tF, A, F, nomsRef, effectifs, tEff }) {
     if (action == null && montant === 0) continue;
     const r = { action, montant, cat: nettoyer(A.categorie[i]), type: nettoyer(A.type[i]),
       pays: nettoyer(A.pays[i]), secteur: nettoyer(A.secteur[i]), institut: nettoyer(A.institut[i]),
-      institut_nom: nettoyer(A.institut_nom[i]) };
+      institut_nom: nettoyer(A.institut_nom[i]),
+      oa_subfield: nettoyer(A.oa_subfield[i]), oa_field: nettoyer(A.oa_field[i]), oa_domain: nettoyer(A.oa_domain[i]) };
     r.cle = action == null ? null : squish(action).toUpperCase();
     r.type_cat = r.type == null ? null : `${r.cat ?? "?"} - ${r.type}`;
     if (r.pays != null) {
@@ -408,7 +420,8 @@ function preparer({ tA, tF, A, F, nomsRef, effectifs, tEff }) {
     if (!cibles) { nonRapproches.push(f); continue; }
     for (const a of cibles) baseFin.push({ ...f, montant: f.montant / cibles.length,
       montant_norm: f.montant_norm / cibles.length, id: a.id, cat: a.cat, type: a.type,
-      type_cat: a.type_cat, pays: a.pays, secteur: a.secteur, institut: a.institut });
+      type_cat: a.type_cat, pays: a.pays, secteur: a.secteur, institut: a.institut,
+      oa_subfield: a.oa_subfield, oa_field: a.oa_field, oa_domain: a.oa_domain });
   }
   // Base « par institut » : attribution des financements DEI
   const codesInst = x => parties(x || "").map(v => squish(v.replace(/\(.*\)/, ""))).filter(v => P.instituts.includes(v));
@@ -527,9 +540,54 @@ function carteBrute(classe, titre, sousTitre, contenu) {
   const sec = h("section", { class: classe });
   const btn = h("button", { class: "btn-plein", title: "Agrandir", "aria-label": "Agrandir le graphique",
     onclick: () => basculerPlein(sec, btn) }, "⤢");
-  sec.append(...[h("div", { class: "entete" }, h("h2", {}, titre), btn), sousTitre ? h("p", { class: "st" }, sousTitre) : null, contenu]
+  const btnPng = h("button", { class: "btn-dl", title: "Télécharger le graphique (image PNG)", onclick: e => telechargerPng(sec, titre, e.target) }, "⬇ PNG");
+  const btnCsv = h("button", { class: "btn-dl", title: "Télécharger le tableau des données (CSV, s'ouvre dans Excel)", onclick: () => telechargerCsv(sec, titre) }, "⬇ CSV");
+  sec.append(...[h("div", { class: "entete" }, h("h2", {}, titre), h("div", { class: "actions" }, btnPng, btnCsv, btn)),
+    sousTitre ? h("p", { class: "st" }, sousTitre) : null, contenu]
     .flat(Infinity).filter(x => x != null && x !== false));
+  if (!sec.querySelector("details.tab")) btnCsv.remove();
   return sec;
+}
+
+// --- Téléchargements -----------------------------------------------------------
+const nomFichier = (titre, ext) => `${P.annee}_${String(titre).normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  .replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 90)}.${ext}`;
+function enregistrer(blob, nom) {
+  const url = URL.createObjectURL(blob);
+  const a = h("a", { href: url, download: nom }); document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+async function telechargerPng(sec, titre, bouton) {
+  if (!window.html2canvas) { alert("Bibliothèque de capture indisponible (accès à cdnjs.cloudflare.com bloqué ?)."); return; }
+  const lib = bouton.textContent; bouton.textContent = "…";
+  sec.classList.add("capture");
+  try {
+    const canvas = await html2canvas(sec, { scale: 2, backgroundColor: "#ffffff",
+      ignoreElements: el => el.classList && (el.classList.contains("actions") || el.classList.contains("tab")) });
+    canvas.toBlob(b => enregistrer(b, nomFichier(titre, "png")), "image/png");
+  } catch (err) { console.error(err); alert("Capture impossible : " + err.message); }
+  finally { sec.classList.remove("capture"); bouton.textContent = lib; }
+}
+function telechargerCsv(sec, titre) {
+  const det = sec.querySelector("details.tab");
+  const t = det && det._donnees; if (!t) return;
+  const texte = v => v instanceof Node ? v.textContent : v;
+  const cellule = v => {
+    v = texte(v);
+    if (v == null || (typeof v === "number" && !isFinite(v))) return "";
+    if (typeof v === "number") return String(Math.round(v * 100) / 100).replace(".", ",");
+    const s = String(v).replace(/[  ]/g, " ");
+    return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  // Parts en pourcentage ; valeurs du total (déjà mises en forme) reconverties en nombres
+  const estPart = c => c[2] === fmtPart;
+  const nombre = v => { const m = /^(-?[\d\u00a0\u202f ]+(?:,\d+)?)[\u00a0\u202f ]?(€|%)?$/.exec(String(v).trim());
+    return m ? Number(m[1].replace(/[\u00a0\u202f ]/g, "").replace(",", ".")) : v; };
+  const lignes = [t.colonnes.map(c => cellule((c[0] || "Libellé") + (estPart(c) ? " (%)" : ""))).join(";")];
+  for (const l of t.lignes) lignes.push(t.colonnes.map(c => { const v = c[1](l);
+    return cellule(estPart(c) && typeof v === "number" ? Math.round(v * 1000) / 10 : v); }).join(";"));
+  if (t.total) lignes.push(t.colonnes.map((c, i) => cellule(i === 0 ? t.total.lib : nombre(t.total[i] ?? ""))).join(";"));
+  enregistrer(new Blob(["\ufeff" + lignes.join("\r\n")], { type: "text/csv;charset=utf-8" }), nomFichier(titre, "csv"));
 }
 function basculerPlein(sec, btn) {
   const ouvert = sec.classList.contains("plein") || document.fullscreenElement === sec;
@@ -601,12 +659,14 @@ function legendeCat(cats) {
 // Tableau repliable ; colonnes = [[en-tête, fonction, format]]
 function tableau(lignes, colonnes, total, ouvert) {
   const fmt = (f, v) => f === "txt" ? (v ?? "") : f(v);
-  return h("details", { class: "tab", open: ouvert || null },
+  const det = h("details", { class: "tab", open: ouvert || null },
     h("summary", {}, "Tableau des données"),
     h("div", { class: "tablo" }, h("table", {},
       h("thead", {}, h("tr", {}, colonnes.map(c => h("th", {}, c[0])))),
       h("tbody", {}, lignes.map(l => h("tr", {}, colonnes.map((c, i) => h("td", { class: c[2] === "txt" && i > 0 ? "txt" : null }, fmt(c[2], c[1](l)))))),
         total ? h("tr", { class: "total" }, colonnes.map((c, i) => h("td", {}, i === 0 ? total.lib : (total[i] != null ? total[i] : "")))) : null))));
+  det._donnees = { lignes, colonnes, total };   // pour le téléchargement CSV
+  return det;
 }
 const colsStd = [["", l => l.libAff ?? l.lib, "txt"], ["Montant", l => l.montant, fmtEuro],
   ["Part du montant", l => l.part, fmtPart], ["Nombre d'actions", l => l.n, fmtNombre],
@@ -646,6 +706,41 @@ function typesParCat(rows, cats) {
       const types = Object.keys(m).sort((a, b) => m[b] - m[a] || a.localeCompare(b));
       return h("div", {}, h("b", {}, ct), h("i", {}, types.join("  ·  ")));
     }));
+}
+
+// Thématiques : montant par subfield OpenAlex (topic principal), couleur = domaine ;
+// actions sans subfield hors du graphique, comptées dans les tuiles (tableau_thematique du script R)
+const DOMAINES = { "Physical Sciences": ["Sciences physiques", C.bleuf], "Life Sciences": ["Sciences de la vie", C.vert],
+  "Health Sciences": ["Sciences de la santé", C.orange], "Social Sciences": ["Sciences sociales", C.violet] };
+const domaine = d => DOMAINES[d] || ["Non renseigné", C.grisf];
+function carteThematique(titre, rows, o = {}) {
+  const st = `Topic principal de chaque action — ${P.topThematiques} premiers subfields en montant ; actions non classées exclues du graphique`;
+  const d = rows.filter(r => r.oa_subfield != null);
+  if (!d.length) return carte(titre, st, h("p", { class: "vide" }, "Colonne OA_subfield absente ou vide."));
+  const g = new Map();
+  for (const r of d) {
+    const k = r.oa_subfield + "\u0000" + (r.oa_field || "");
+    const e = g.get(k) || g.set(k, { sub: r.oa_subfield, field: r.oa_field || "", dom: r.oa_domain, montant: 0, ids: new Set() }).get(k);
+    e.montant += r.montant; e.ids.add(r.id);
+  }
+  const m = somme(d), m0 = somme(rows), n = distincts(d), n0 = o.nUnivers ?? distincts(rows), f = nFin(d);
+  const tout = [...g.values()].sort((a, b) => b.montant - a.montant);
+  const homonymes = new Set(tout.map(e => e.sub).filter((x, i, arr) => arr.indexOf(x) !== i));
+  const lignes = tout.filter(e => e.montant > 0).slice(0, P.topThematiques).map(e => ({
+    lib: homonymes.has(e.sub) ? `${e.sub} (${e.field})` : e.sub, field: e.field, dom: domaine(e.dom)[0], c: domaine(e.dom)[1],
+    montant: e.montant, part: e.montant / m, n: e.ids.size }));
+  const t = [tuile("Montant des actions classées", fmtCourt(m), `sur ${fmtCourt(m0)} au total (${fmtPart(m / m0)})`),
+    tuile("Nombre d'actions classées", fmtNombre(n), `sur ${fmtNombre(n0)} au total (${fmtPart(n / n0)})`),
+    tuile("Nombre d'actions financées classées", fmtNombre(f), "montant > 0"),
+    tuile("Moyenne par action financée", fmtCourt(m / f))];
+  if (o.tuileExtra) t.splice(1, 0, o.tuileExtra);
+  const doms = Object.values(DOMAINES).filter(([l]) => lignes.some(x => x.dom === l));
+  return carte(titre, st, tuilesEl(t),
+    hbarres(lignes, { segments: l => [{ v: l.montant, c: l.c, t: l.dom }] }),
+    h("div", { class: "legende" }, doms.map(([l, c]) => h("span", { style: { "--c": c, "--b": CLAIRES.has(c) ? C.bleuf : "transparent" } }, l))),
+    tableau(lignes, [["", l => l.lib, "txt"], ["Field", l => l.field, "txt"], ["Domaine", l => l.dom, "txt"],
+      ["Montant", l => l.montant, fmtEuro], ["Part du montant classé", l => l.part, fmtPart], ["Nombre d'actions", l => l.n, fmtNombre]],
+      { lib: "Total général (actions classées)", 3: fmtEuro(m), 4: fmtPart(1), 5: fmtNombre(n) }));
 }
 
 // Par financeur (instituts : fonds propres ; DEI : total) — barres verticales
@@ -745,7 +840,8 @@ function vueGlobale() {
     carteDimension(`Par type d'action — ${P.categorieOutils}`, act, "type", { ...base, quoi: "Types d'action", cats: [P.categorieOutils],
       libTotal: "Total général (tous types)", sousTitre: `Actions de la catégorie ${P.categorieOutils}` }),
     carteDimension("Par pays", act, "pays", { ...base, deplier: true, quoi: "Pays", seuil: S.pays_cat, libTotal: "Total général (tous pays)",
-      sousTitre: "Toutes les actions" })
+      sousTitre: "Toutes les actions" }),
+    carteThematique("Par thématique (subfield OpenAlex)", act, base)
   ];
   const large = el => { el.classList.add("large"); return el; };
   cartes.push(large(carteFinanceur("Par financeur (instituts et DEI)", fin, nA, S.financeur_inst)),
@@ -835,7 +931,8 @@ function serieFinanceur(f, avecSynthese) {
     carteDimension(`${lib} — par secteur géographique DEI`, d, "secteur", { ...base, deplier: true, quoi: "Secteurs", seuil: s("secteur_total"),
       sousTitre: "Toutes les actions, sans filtre de catégorie" }),
     carteDimension(`${lib} — par pays, toutes actions`, d, "pays", { ...base, deplier: true, quoi: "Pays", seuil: s("pays_tout"), top: P.topPays,
-      libTotal: "Total général (tous pays)", sousTitre: `Toutes les actions, sans filtre de catégorie — ${P.topPays} premiers pays en montant` }));
+      libTotal: "Total général (tous pays)", sousTitre: `Toutes les actions, sans filtre de catégorie — ${P.topPays} premiers pays en montant` }),
+    carteThematique(`${lib} — par thématique (subfield OpenAlex)`, d, base));
   if (estDEI) cartes.push(
     carteDimension(`${lib} — par pays, ${P.categorieAfrique}`, d, "pays", { ...base, deplier: true, quoi: "Pays", seuil: s("pays_afrique"),
       cats: [P.categorieAfrique], libTotal: "Total général (tous pays)", sousTitre: `Actions de la catégorie ${P.categorieAfrique}` }),

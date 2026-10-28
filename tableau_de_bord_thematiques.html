@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thématiques des actions internationales</title>
+<!-- API des widgets personnalisés Grist (servie par docs.getgrist.com ; sur une instance
+     auto-hébergée, on peut la remplacer par https://<votre-instance>/grist-plugin-api.js) -->
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<!-- Capture des graphiques en image PNG -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+:root {
+  --jaune: #FFEB6E; --bleuf: #00284b; --grisc: #ebf0f5; --grisf: #8296a5;
+  --violet: #6941eb; --vert: #b0ee89; --orange: #ffbc75; --bleuc: #9ae2ff;
+  --fond: #f6f8fb; --carte: #ffffff; --texte: #00284b; --doux: #5b6f80; --ligne: #dfe6ee;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--fond); color: var(--texte);
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { position: sticky; top: 0; z-index: 5; background: var(--bleuf); color: #fff; padding: 10px 16px 0; }
+header h1 { margin: 0 0 8px; font-size: 16px; font-weight: 650; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+header h1 small { font-weight: 400; color: #c9d6e2; font-size: 12px; }
+nav { display: flex; gap: 2px; flex-wrap: wrap; }
+nav button { border: 0; background: transparent; color: #c9d6e2; padding: 8px 12px; font: inherit; font-weight: 600;
+  cursor: pointer; border-radius: 6px 6px 0 0; }
+nav button[aria-selected="true"] { background: var(--fond); color: var(--bleuf); }
+nav button:hover:not([aria-selected="true"]) { color: #fff; }
+.barre-outils { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; padding: 12px 16px 0; }
+.barre-outils label { display: flex; gap: 6px; align-items: center; color: var(--doux); font-weight: 600; }
+select, input[type=number], input[type=search] { font: inherit; color: var(--texte); border: 1px solid var(--ligne);
+  border-radius: 6px; padding: 5px 8px; background: #fff; max-width: calc(100vw - 130px); }
+button.petit { font: inherit; border: 1px solid var(--ligne); background: #fff; color: var(--texte); border-radius: 6px;
+  padding: 5px 10px; cursor: pointer; }
+button.petit:hover { border-color: var(--grisf); }
+.etat { padding: 8px 16px 0; color: var(--doux); font-size: 12px; }
+.etat details { display: inline; }
+.etat summary { display: inline; cursor: pointer; color: #9a5b00; font-weight: 600; }
+.etat .liste { background: #fff8e0; border: 1px solid #f0d98a; border-radius: 6px; padding: 8px 10px; margin-top: 6px;
+  max-height: 220px; overflow: auto; }
+main { padding: 12px 16px 32px; display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 560px), 1fr)); }
+.carte { background: var(--carte); border: 1px solid var(--ligne); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.carte.large { grid-column: 1 / -1; }
+.carte h2 { margin: 0; font-size: 14px; font-weight: 650; }
+.carte .st { margin: 2px 0 10px; color: var(--doux); font-size: 12px; }
+.tuiles { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.tuile { background: var(--grisc); border-radius: 8px; padding: 7px 10px; min-width: 120px; flex: 1 1 120px; }
+.tuile .l { font-size: 11px; color: var(--doux); font-weight: 600; }
+.tuile .v { font-size: 17px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.tuile .d { font-size: 11px; color: var(--doux); }
+.tuile.jaune { background: var(--jaune); }
+.tuile .v.long, .fiche .tuile .v.long { font-size: 13px; }
+.vdefil { overflow-x: auto; }
+.fiche .tuile { flex-basis: 170px; }
+.fiche .tuile .v { font-size: 20px; }
+/* Barres horizontales */
+.hbarres { display: grid; grid-template-columns: minmax(90px, 34%) 1fr auto; gap: 4px 8px; align-items: center; }
+.hbarres .lib { text-align: right; font-size: 12px; line-height: 1.2; overflow-wrap: break-word; }
+.hbarres .piste { height: 16px; display: flex; min-width: 0; }
+.hbarres .seg { height: 100%; border: 1px solid transparent; }
+.hbarres .seg.clair { border-color: var(--bleuf); }
+.hbarres .val { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--doux); }
+/* Barres verticales */
+.vbarres { display: flex; align-items: flex-end; gap: 6px; height: 230px; padding-top: 18px; border-bottom: 1px solid var(--ligne); }
+.vbarres .col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; }
+.vbarres .b { width: 70%; max-width: 46px; background: var(--bleuf); border: 1px solid transparent; }
+.vbarres .b.clair { border-color: var(--bleuf); }
+.vbarres .v { font-size: 10.5px; color: var(--doux); white-space: nowrap; margin-bottom: 2px; }
+.vlibs { display: flex; gap: 6px; margin-top: 4px; }
+.vlibs div { flex: 1 1 0; min-width: 0; font-size: 10.5px; text-align: center; hyphens: auto; overflow-wrap: break-word; line-height: 1.2; }
+.vbarres .col.duo { flex-direction: row; align-items: flex-end; justify-content: center; gap: 2px; }
+.vbarres .col.duo > div { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; flex: 0 1 34px; min-width: 0; }
+.vbarres .col.duo .b { width: 100%; }
+.carte .entete { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.btn-plein { flex: none; border: 1px solid var(--ligne); background: #fff; color: var(--texte); border-radius: 6px; width: 30px; height: 28px;
+  cursor: pointer; font-size: 15px; line-height: 1; }
+.btn-plein:hover { border-color: var(--grisf); }
+.btn-dl { flex: none; border: 1px solid var(--ligne); background: #fff; color: var(--texte); border-radius: 6px; height: 28px;
+  padding: 0 8px; cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.btn-dl:hover { border-color: var(--grisf); }
+.entete .actions { display: flex; gap: 6px; flex: none; }
+.carte.plein { position: fixed; inset: 0; z-index: 50; border-radius: 0; overflow: auto; padding: 20px 28px; }
+.carte.plein .vbarres { height: 55vh; }
+.carte.plein .hbarres .piste { height: 20px; }
+.carte.plein .hbarres .lib, .carte.plein .hbarres .val { font-size: 13px; }
+.carte:fullscreen { overflow: auto; padding: 20px 28px; }
+.carte:fullscreen .vbarres { height: 55vh; }
+body.plein-ouvert { overflow: hidden; }
+.legende { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 0 0; font-size: 11.5px; }
+.legende span::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px;
+  background: var(--c); border: 1px solid var(--b, transparent); }
+.deux { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.deux h3 { font-size: 12px; margin: 0 0 6px; color: var(--doux); }
+.types { background: var(--grisc); border-radius: 8px; padding: 8px 10px; margin-top: 10px; font-size: 11.5px; }
+.types div { padding: 3px 0; border-top: 1.5px solid #fff; }
+.types div:first-child { border-top: 0; }
+.types b { margin-right: 6px; }
+.types i { color: var(--doux); }
+details.tab { margin-top: 10px; }
+details.tab summary { cursor: pointer; color: var(--doux); font-weight: 600; font-size: 12px; }
+.tablo { overflow-x: auto; margin-top: 6px; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th { text-align: right; background: #D9E1F2; color: #1F3864; padding: 4px 8px; white-space: nowrap; }
+td { text-align: right; padding: 3px 8px; font-variant-numeric: tabular-nums; }
+th:first-child, td:first-child { text-align: left; }
+td.txt { text-align: left; color: var(--doux); }
+tbody tr:nth-child(odd) { background: #f3f4f7; }
+tr.total td { font-weight: 700; background: #fff; border-top: 1px solid var(--ligne); }
+.vide { color: var(--doux); font-style: italic; }
+.attente { padding: 40px 16px; color: var(--doux); text-align: center; }
+.erreur { padding: 16px; margin: 16px; background: #fff0f0; border: 1px solid #f3b9b9; border-radius: 8px; white-space: pre-wrap; }
+@media (max-width: 640px) { .deux { grid-template-columns: 1fr; } .hbarres { grid-template-columns: minmax(80px, 38%) 1fr auto; } }
+.fh { display: flex; gap: 8px; align-items: baseline; margin: 12px 0 4px; padding-bottom: 2px; border-bottom: 1px solid var(--ligne); }
+.fh:first-of-type { margin-top: 0; }
+.fh i { width: 10px; height: 10px; border-radius: 2px; flex: none; align-self: center; border: 1px solid transparent; }
+.fh small { color: var(--doux); font-variant-numeric: tabular-nums; }
+.matrice { display: block; max-width: none; }
+.matrice .rl { cursor: pointer; }
+.matrice .rl:hover { text-decoration: underline; }
+.liste-projets { max-height: 32rem; overflow: auto; }
+.liste-projets th { position: sticky; top: 0; }
+.liste-projets td { vertical-align: top; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span id="titre">Thématiques des actions internationales</span><small id="sous-titre"></small></h1>
+</header>
+<div class="barre-outils" id="outils"></div>
+<div class="etat" id="etat"></div>
+<main id="app"><div class="attente">Chargement de la table Grist…</div></main>
+<script>
+const VERSION = "28 oct. 2026 · v2";
+// ============================================================================
+// 1. PARAMÈTRES
+// ============================================================================
+const P = {
+  annee: 2026,
+  // Libellés des colonnes de la table des actions (reconnus sans tenir compte de la casse,
+  // des accents ni de la ponctuation)
+  colonnes: { action: "ACTION", acronyme: "ACRONYME", titre_fr: "TITRE (FR)", titre_en: "TITLE (EN)",
+    categorie: "CATEGORIE D'ACTION", institut: "INSTITUT", institut_nom: ["INSTITUT_institut_nom", "INSTITUT_nom"],
+    pays: "PAYS", oa_topic: ["OA_p_topic", "OA_topic_1"], oa_topics2: ["OA_s_topic"], oa_subfield: "OA_subfield", oa_field: ["OA_field", "$OA_field"],
+    oa_domain: "OA_domain", oa_keywords: ["OA_kw", "OA_keywords"] },
+  facultatives: ["acronyme", "titre_fr", "titre_en", "categorie", "institut", "institut_nom", "pays", "oa_topic", "oa_topics2", "oa_field", "oa_domain", "oa_keywords"],
+  petitsSubfields: 5,      // sans filtre, subfields de moins de N actions regroupés en « Autres »
+  topPays: 15, topSubfields: 12,   // matrice pays × subfields
+  recodagePays: { "Egypte": "Égypte", "Hong-Kong": "Hong Kong", "Peru": "Pérou", "Tunis": "Tunisie", "Tchéquie": "République Tchèque" },
+  sep: ","
+};
+const C = { jaune: "#FFEB6E", bleuf: "#00284b", grisc: "#ebf0f5", grisf: "#8296a5",
+            violet: "#6941eb", vert: "#b0ee89", orange: "#ffbc75", bleuc: "#9ae2ff" };
+const CLAIRES = new Set([C.jaune, C.vert, C.orange, C.bleuc, C.grisc]);
+
+// ============================================================================
+// 2. OUTILS
+// ============================================================================
+const NBSP = " ";
+const groupe = n => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
+const fmtEuro = v => groupe(v) + NBSP + "€";
+const fmtNombre = v => groupe(v);
+const fmtPart = v => isFinite(v) ? (v * 100).toFixed(1).replace(".", ",") + NBSP + "%" : "—";
+const fmtCourt = v => {
+  if (v == null || !isFinite(v)) return "—";
+  const a = Math.abs(v);
+  if (a >= 1e6) return (v / 1e6).toFixed(2).replace(".", ",") + NBSP + "M€";
+  if (a >= 1e3) return groupe(v / 1e3) + NBSP + "k€";
+  return fmtEuro(v);
+};
+const fmtK = v => groupe(v / 1e3) + NBSP + "k€";
+const squish = s => String(s).replace(/[  ]/g, " ").replace(/\s+/g, " ").trim();
+const norm = s => String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+const sansAccent = s => String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
+const triAlpha = (a, b) => sansAccent(a).localeCompare(sansAccent(b));
+const somme = (rows, f = r => r.montant) => rows.reduce((s, r) => s + f(r), 0);
+const distincts = (rows, f = r => r.id) => new Set(rows.map(f)).size;
+const nFin = rows => distincts(rows.filter(r => r.montant > 0));
+const parties = v => v == null ? [] : String(v).split(P.sep).map(squish).filter(x => x !== "");
+const estEnCours = cat => sansAccent(cat || "").replace(/\s/g, "").startsWith(sansAccent(P.prefixeEnCours).replace(/\s/g, ""));
+const dansCats = (cat, liste) => liste.map(x => x.toUpperCase()).includes(String(cat || "").toUpperCase());
+
+function nettoyer(v) {
+  if (v == null) return null;
+  const s = squish(String(v).replace(/^"|"$/g, ""));
+  return s === "" ? null : s;
+}
+function enNombre(v) {
+  if (v == null || v === "") return NaN;
+  if (typeof v === "number") return v;
+  const s = String(v).replace(/[\s  €]/g, "").replace(",", ".");
+  return s === "" ? NaN : Number(s);
+}
+// Construction d'éléments HTML (le texte est toujours inséré comme texte, jamais comme HTML)
+function h(tag, attrs, ...enfants) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "style" && typeof v === "object")
+      for (const [p, x] of Object.entries(v)) { if (p.startsWith("--")) el.style.setProperty(p, x); else el.style[p] = x; }
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "class") el.className = v;
+    else el.setAttribute(k, v);
+  }
+  for (const e of enfants.flat(Infinity)) if (e != null && e !== false) el.append(e instanceof Node ? e : String(e));
+  return el;
+}
+
+// « Déplie » des colonnes multi-valeurs : une ligne par valeur, montant partagé à parts égales
+function deplier(rows, cols) {
+  cols = [].concat(cols);
+  const out = [];
+  for (const r of rows) {
+    const listes = cols.map(c => parties(r[c]));
+    if (listes.some(l => l.length === 0)) continue;
+    const nb = listes.reduce((p, l) => p * l.length, 1);
+    let combis = [{}];
+    cols.forEach((c, i) => { combis = combis.flatMap(o => listes[i].map(v => ({ ...o, [c]: v }))); });
+    for (const o of combis) out.push({ ...r, ...o, montant: r.montant / nb, montant_norm: (r.montant_norm || 0) / nb });
+  }
+  return out;
+}
+
+// ============================================================================
+// 3. LECTURE DES TABLES GRIST
+// ============================================================================
+const cacheTables = {};
+async function table(tid) {
+  if (!cacheTables[tid]) cacheTables[tid] = await grist.docApi.fetchTable(tid);
+  return cacheTables[tid];
+}
+
+// Métadonnées : libellé, type et colonne affichée de chaque colonne (si l'accès le permet)
+async function lireMeta() {
+  try {
+    const t = await grist.docApi.fetchTable("_grist_Tables");
+    const c = await grist.docApi.fetchTable("_grist_Tables_column");
+    const tid = {}; t.id.forEach((id, i) => tid[id] = t.tableId[i]);
+    const parId = {}; c.id.forEach((id, i) => parId[id] = { colId: c.colId[i], table: tid[c.parentId[i]] });
+    const cols = {};
+    c.id.forEach((id, i) => {
+      const tab = tid[c.parentId[i]]; if (!tab) return;
+      (cols[tab] = cols[tab] || []).push({ colId: c.colId[i], label: c.label[i] || c.colId[i],
+        type: c.type[i] || "Any", visibleCol: c.visibleCol ? parId[c.visibleCol[i]] : null });
+    });
+    return cols;
+  } catch (e) { return null; }
+}
+
+// Repère la colonne Grist correspondant à un libellé attendu
+function trouverColonne(colsTable, libelle) {
+  if (Array.isArray(libelle)) { for (const l of libelle) { const c = trouverColonne(colsTable, l); if (c) return c; } return null; }
+  const n = norm(libelle);
+  return colsTable.find(c => norm(c.label) === n) || colsTable.find(c => norm(c.colId) === n) || null;
+}
+
+// Valeurs d'une colonne, références et listes décodées en texte « a, b »
+async function valeurs(tab, col) {
+  const data = await table(tab);
+  const brut = data[col.colId] || [];
+  let ref = null;
+  const m = /^Ref(List)?:(.+)$/.exec(col.type || "");
+  if (m && col.visibleCol && col.visibleCol.colId) {
+    try {
+      const cible = await table(m[2]);
+      ref = new Map(cible.id.map((id, i) => [id, cible[col.visibleCol.colId][i]]));
+    } catch (e) { throw new Error(`La table référencée « ${m[2]} » (colonne ${col.label}) n'est pas lisible : elle doit rester visible pour les lecteurs du tableau de bord.`); }
+  }
+  const un = v => (ref && typeof v === "number") ? (ref.get(v) ?? null) : v;
+  return brut.map(v => {
+    if (Array.isArray(v) && v[0] === "L") return v.slice(1).map(un).filter(x => x != null && x !== "").join(", ");
+    if (Array.isArray(v)) return null;                 // valeur d'erreur Grist
+    return un(v);
+  });
+}
+
+const tuile = (l, v, d, cls) => ({ l, v, d, cls });
+function tuilesEl(ts, fiche) {
+  return h("div", { class: "tuiles" + (fiche ? " fiche" : "") },
+    ts.filter(Boolean).map(t => h("div", { class: "tuile" + (t.cls ? " " + t.cls : "") },
+      h("div", { class: "l" }, t.l), h("div", { class: "v" + (String(t.v).length > 22 ? " long" : "") }, t.v), t.d ? h("div", { class: "d" }, t.d) : null)));
+}
+
+function carte(titre, sousTitre, ...contenu) {
+  return carteBrute("carte", titre, sousTitre, contenu);
+}
+// Carte avec bouton « plein écran » (API Fullscreen si l'iframe Grist l'autorise, sinon
+// la carte occupe toute la zone du widget ; Échap ou le bouton pour revenir)
+function carteBrute(classe, titre, sousTitre, contenu) {
+  const sec = h("section", { class: classe });
+  const btn = h("button", { class: "btn-plein", title: "Agrandir", "aria-label": "Agrandir le graphique",
+    onclick: () => basculerPlein(sec, btn) }, "⤢");
+  const btnPng = h("button", { class: "btn-dl", title: "Télécharger le graphique (image PNG)", onclick: e => telechargerPng(sec, titre, e.target) }, "⬇ PNG");
+  const btnCsv = h("button", { class: "btn-dl", title: "Télécharger le tableau des données (CSV, s'ouvre dans Excel)", onclick: () => telechargerCsv(sec, titre) }, "⬇ CSV");
+  sec.append(...[h("div", { class: "entete" }, h("h2", {}, titre), h("div", { class: "actions" }, btnPng, btnCsv, btn)),
+    sousTitre ? h("p", { class: "st" }, sousTitre) : null, contenu]
+    .flat(Infinity).filter(x => x != null && x !== false));
+  if (!sec.querySelector("details.tab")) btnCsv.remove();
+  return sec;
+}
+
+// --- Téléchargements -----------------------------------------------------------
+const nomFichier = (titre, ext) => `${P.annee}_${String(titre).normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  .replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 90)}.${ext}`;
+function enregistrer(blob, nom) {
+  const url = URL.createObjectURL(blob);
+  const a = h("a", { href: url, download: nom }); document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+async function telechargerPng(sec, titre, bouton) {
+  if (!window.html2canvas) { alert("Bibliothèque de capture indisponible (accès à cdnjs.cloudflare.com bloqué ?)."); return; }
+  const lib = bouton.textContent; bouton.textContent = "…";
+  sec.classList.add("capture");
+  try {
+    const canvas = await html2canvas(sec, { scale: 2, backgroundColor: "#ffffff",
+      ignoreElements: el => el.classList && (el.classList.contains("actions") || el.classList.contains("tab")) });
+    canvas.toBlob(b => enregistrer(b, nomFichier(titre, "png")), "image/png");
+  } catch (err) { console.error(err); alert("Capture impossible : " + err.message); }
+  finally { sec.classList.remove("capture"); bouton.textContent = lib; }
+}
+function telechargerCsv(sec, titre) {
+  const det = sec.querySelector("details.tab");
+  const t = det && det._donnees; if (!t) return;
+  const texte = v => v instanceof Node ? v.textContent : v;
+  const cellule = v => {
+    v = texte(v);
+    if (v == null || (typeof v === "number" && !isFinite(v))) return "";
+    if (typeof v === "number") return String(Math.round(v * 100) / 100).replace(".", ",");
+    const s = String(v).replace(/[  ]/g, " ");
+    return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  // Parts en pourcentage ; valeurs du total (déjà mises en forme) reconverties en nombres
+  const estPart = c => c[2] === fmtPart;
+  const nombre = v => { const m = /^(-?[\d\u00a0\u202f ]+(?:,\d+)?)[\u00a0\u202f ]?(€|%)?$/.exec(String(v).trim());
+    return m ? Number(m[1].replace(/[\u00a0\u202f ]/g, "").replace(",", ".")) : v; };
+  const lignes = [t.colonnes.map(c => cellule((c[0] || "Libellé") + (estPart(c) ? " (%)" : ""))).join(";")];
+  for (const l of t.lignes) lignes.push(t.colonnes.map(c => { const v = c[1](l);
+    return cellule(estPart(c) && typeof v === "number" ? Math.round(v * 1000) / 10 : v); }).join(";"));
+  if (t.total) lignes.push(t.colonnes.map((c, i) => cellule(i === 0 ? t.total.lib : nombre(t.total[i] ?? ""))).join(";"));
+  enregistrer(new Blob(["\ufeff" + lignes.join("\r\n")], { type: "text/csv;charset=utf-8" }), nomFichier(titre, "csv"));
+}
+function basculerPlein(sec, btn) {
+  const ouvert = sec.classList.contains("plein") || document.fullscreenElement === sec;
+  if (ouvert) {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    sec.classList.remove("plein"); document.body.classList.remove("plein-ouvert");
+    btn.textContent = "⤢"; btn.title = "Agrandir";
+    return;
+  }
+  const ouvrirOverlay = () => { sec.classList.add("plein"); document.body.classList.add("plein-ouvert"); };
+  btn.textContent = "✕"; btn.title = "Réduire";
+  if (sec.requestFullscreen && document.fullscreenEnabled) sec.requestFullscreen().catch(ouvrirOverlay);
+  else ouvrirOverlay();
+  const tab = sec.querySelector("details.tab"); if (tab) tab.open = true;
+}
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  const p = document.querySelector(".carte.plein"); if (p) p.querySelector(".btn-plein").click();
+});
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement) document.querySelectorAll(".btn-plein").forEach(b => {
+    if (!b.closest(".plein")) { b.textContent = "⤢"; b.title = "Agrandir"; } });
+});
+
+// Barres horizontales ; segments = [{v, c, t}] pour les barres empilées ; max commun facultatif
+function hbarres(lignes, { couleur = C.bleuf, segments, valeur = l => l.montant, fmt = fmtCourt, max, titre } = {}) {
+  max = max || Math.max(...lignes.map(valeur), 0) || 1;
+  return h("div", { class: "hbarres" }, lignes.map(l => {
+    const segs = segments ? segments(l) : [{ v: valeur(l), c: couleur }];
+    const info = titre && titre(l);
+    return [
+      h("div", { class: "lib", title: info || l.lib }, l.libAff ?? l.lib),
+      h("div", { class: "piste" }, segs.filter(s => s.v > 0).map(s => h("div", {
+        class: "seg" + (CLAIRES.has(s.c) ? " clair" : ""), title: info || `${s.t ? s.t + " — " : ""}${fmt(s.v)}`,
+        style: { width: Math.min(100, s.v / max * 100) + "%", background: s.c } }))),
+      h("div", { class: "val" }, fmt(valeur(l)))
+    ];
+  }));
+}
+
+// Tableau repliable ; colonnes = [[en-tête, fonction, format]]
+function tableau(lignes, colonnes, total, ouvert) {
+  const fmt = (f, v) => f === "txt" ? (v ?? "") : f(v);
+  const det = h("details", { class: "tab", open: ouvert || null },
+    h("summary", {}, "Tableau des données"),
+    h("div", { class: "tablo" }, h("table", {},
+      h("thead", {}, h("tr", {}, colonnes.map(c => h("th", {}, c[0])))),
+      h("tbody", {}, lignes.map(l => h("tr", {}, colonnes.map((c, i) => h("td", { class: c[2] === "txt" && i > 0 ? "txt" : null }, fmt(c[2], c[1](l)))))),
+        total ? h("tr", { class: "total" }, colonnes.map((c, i) => h("td", {}, i === 0 ? total.lib : (total[i] != null ? total[i] : "")))) : null))));
+  det._donnees = { lignes, colonnes, total };   // pour le téléchargement CSV
+  return det;
+}
+// ============================================================================
+// 4. LECTURE DE LA TABLE DES ACTIONS
+// ============================================================================
+async function chargerDonnees(options) {
+  const meta = await lireMeta();
+  const listeTables = (await grist.docApi.listTables()).filter(t => !t.startsWith("_grist"));
+  const colonnesDe = async tid => meta && meta[tid] ? meta[tid].filter(c => c.colId !== "manualSort" && !c.colId.startsWith("gristHelper"))
+    : Object.keys(await table(tid)).filter(k => k !== "id" && k !== "manualSort").map(k => ({ colId: k, label: k, type: "Any" }));
+  const ca = P.colonnes;
+  let tA = options.tableActions && listeTables.includes(options.tableActions) ? options.tableActions : null;
+  if (!tA) for (const tid of listeTables) {
+    let cols; try { cols = await colonnesDe(tid); } catch (e) { continue; }   // table masquée
+    if (trouverColonne(cols, ca.action) && trouverColonne(cols, ca.oa_subfield)) { tA = tid; break; }
+  }
+  if (!tA) throw new Error(`Table introuvable : le widget cherche une table contenant les colonnes « ${ca.action} » et « ${ca.oa_subfield} ».\n` +
+    "Tables du document : " + listeTables.join(", ") + "\n→ Vérifier l'accès complet au document (« Accès complet au document »).");
+  const cols = await colonnesDe(tA);
+  const data = await table(tA);
+  const A = { n: data.id.length, cols: {} }, manq = [];
+  for (const [role, lib] of Object.entries(ca)) {
+    const c = trouverColonne(cols, lib);
+    A.cols[role] = c ? `${c.label}${c.colId !== c.label ? " [" + c.colId + "]" : ""} — ${c.type}` : null;
+    if (!c) { if (!P.facultatives.includes(role)) manq.push(Array.isArray(lib) ? lib[0] : lib); A[role] = new Array(data.id.length).fill(null); }
+    else A[role] = await valeurs(tA, c);
+  }
+  if (manq.length) throw new Error(`Colonnes introuvables dans ${tA} : ` + manq.join(", "));
+  return { tA, A };
+}
+
+// ============================================================================
+// 5. PRÉPARATION
+// ============================================================================
+function preparer({ tA, A }) {
+  const projets = [];
+  for (let i = 0; i < A.n; i++) {
+    const action = nettoyer(A.action[i]);
+    if (action == null) continue;
+    const codes = parties(A.institut[i]).map(c => squish(c.replace(/\(.*\)/, "")));
+    const noms = parties(A.institut_nom[i]);
+    const subfield = nettoyer(A.oa_subfield[i]);
+    const classe = subfield != null;
+    projets.push({
+      id: projets.length + 1, action, acronyme: nettoyer(A.acronyme[i]) ?? "",
+      titre: nettoyer(A.titre_en[i]) ?? nettoyer(A.titre_fr[i]) ?? "",
+      categorie: nettoyer(A.categorie[i]) ?? "Non renseigné",
+      instituts: [...new Set(noms.length ? noms : codes)],
+      pays: [...new Set(parties(A.pays[i]).map(p => P.recodagePays[p] || p))],
+      classe, subfield: classe ? subfield : "Non classé",
+      field: classe ? (nettoyer(A.oa_field[i]) ?? "Non renseigné") : "Non classé",
+      domain: classe ? (nettoyer(A.oa_domain[i]) ?? "Non renseigné") : "Non classé",
+      topic: classe ? (nettoyer(A.oa_topic[i]) ?? "") : "",
+      topics2: nettoyer(A.oa_topics2[i]) ?? "",
+      motscles: nettoyer(A.oa_keywords[i]) ?? ""
+    });
+  }
+  // Un libellé de subfield peut exister dans deux fields (Archeology, Genetics) : le field est
+  // ajouté au libellé en cas d'homonymie
+  const fieldsDe = {};
+  for (const p of projets) if (p.classe) (fieldsDe[p.subfield] = fieldsDe[p.subfield] || new Set()).add(p.field);
+  for (const p of projets) if (p.classe && fieldsDe[p.subfield].size > 1) p.subfield = `${p.subfield} (${p.field})`;
+  return { tA, cols: A.cols, projets };
+}
+
+// ============================================================================
+// 6. RENDU
+// ============================================================================
+let D = null;
+const filtres = { institut: "", pays: "", domaine: "", categorie: "" };
+let recherche = "", tri = { cle: "id", sens: 1 };
+
+const DOMAINES = { "Physical Sciences": ["Sciences physiques", C.bleuf], "Life Sciences": ["Sciences de la vie", C.vert],
+  "Health Sciences": ["Sciences de la santé", C.orange], "Social Sciences": ["Sciences sociales", C.violet],
+  "Non classé": ["Non classé", C.grisc], "Non renseigné": ["Non renseigné", C.grisf] };
+const dom = d => DOMAINES[d] || ["Non renseigné", C.grisf];
+const compter = (rows, f) => {
+  const m = new Map();
+  for (const r of rows) for (const k of [].concat(f(r))) m.set(k, (m.get(k) || 0) + 1);
+  return [...m].sort((a, b) => b[1] - a[1] || triAlpha(a[0], b[0]));
+};
+const nonClasseALaFin = (a, b) => (a[0] === "Non classé") - (b[0] === "Non classé");
+
+function selection() {
+  return D.projets.filter(p => (!filtres.institut || p.instituts.includes(filtres.institut)) &&
+    (!filtres.pays || p.pays.includes(filtres.pays)) && (!filtres.domaine || p.domain === filtres.domaine) &&
+    (!filtres.categorie || p.categorie === filtres.categorie));
+}
+const unFiltre = () => Object.values(filtres).some(Boolean);
+
+function barreOutils() {
+  const o = document.getElementById("outils"); o.replaceChildren();
+  const tous = D.projets;
+  const sel = (lib, cle, vide, choix) => h("label", {}, lib, h("select", { onchange: e => { filtres[cle] = e.target.value; afficher(); } },
+    h("option", { value: "" }, vide), choix.map(([v, n]) => h("option", { value: v, selected: v === filtres[cle] || null }, `${cle === "domaine" ? dom(v)[0] : v} (${fmtNombre(n)})`))));
+  o.append(
+    sel("Institut", "institut", "Tous les instituts", compter(tous, p => p.instituts).sort((a, b) => triAlpha(a[0], b[0]))),
+    sel("Pays partenaire", "pays", "Tous les pays", compter(tous, p => p.pays)),
+    sel("Domaine", "domaine", "Tous les domaines", compter(tous, p => p.domain).sort(nonClasseALaFin)),
+    sel("Catégorie d'action", "categorie", "Toutes les catégories", compter(tous, p => p.categorie)),
+    h("button", { class: "petit", onclick: () => { Object.keys(filtres).forEach(k => filtres[k] = ""); recherche = ""; afficher(); } }, "Tout afficher"),
+    h("button", { class: "petit", title: "Relire la table Grist", onclick: () => demarrer(true) }, "↻ Actualiser"));
+}
+
+function bandeauEtat() {
+  const e = document.getElementById("etat"); e.replaceChildren();
+  const nc = D.projets.filter(p => !p.classe).length;
+  e.append(`Table : ${D.tA} (${fmtNombre(D.projets.length)} actions) · ${fmtNombre(nc)} action(s) sans subfield OpenAlex (« Non classé ») · `,
+    h("details", {}, h("summary", { style: { color: "var(--doux)" } }, "Colonnes lues"),
+      h("div", { class: "liste", style: { background: "#fff", borderColor: "var(--ligne)" } },
+        Object.entries(D.cols).map(([r, c]) => h("div", {}, `${r} → ${c ?? "absente"}`)))));
+}
+
+// Chiffres clés de la sélection
+function carteChiffres(rows) {
+  const cl = rows.filter(p => p.classe);
+  const subs = compter(cl, p => p.subfield);
+  return carteBrute("carte large", `Chiffres clés${unFiltre() ? " — sélection" : ""}`,
+    "Une action compte une fois, d'après son topic OpenAlex principal ; les actions sans subfield sont « Non classé »", [
+    tuilesEl([tuile("Actions", fmtNombre(rows.length), unFiltre() ? `sur ${fmtNombre(D.projets.length)} au total` : null),
+      tuile("Classées (topic OpenAlex)", fmtNombre(cl.length), `${fmtPart(cl.length / rows.length)} des actions`),
+      tuile("Non classées", fmtNombre(rows.length - cl.length)),
+      tuile("Subfields distincts", fmtNombre(subs.length)),
+      tuile("Topics distincts", fmtNombre(new Set(cl.map(p => p.topic).filter(Boolean)).size)),
+      subs.length ? tuile("Subfield le plus fréquent", subs[0][0], `${fmtNombre(subs[0][1])} actions`) : null], true)]);
+}
+
+// Projets par field puis subfield (barres groupées par field, couleur = domaine)
+function carteFields(rows) {
+  const total = rows.length;
+  const seuil = unFiltre() ? 0 : P.petitsSubfields;
+  const fields = compter(rows, p => p.field).sort(nonClasseALaFin);
+  const domDe = new Map(rows.map(p => [p.field, p.domain]));
+  const blocs = fields.map(([field, nf]) => {
+    let subs = compter(rows.filter(p => p.field === field), p => p.subfield).map(([lib, n]) => ({ lib, n }));
+    if (seuil && field !== "Non classé") {
+      const petits = subs.filter(s => s.n < seuil);
+      subs = subs.filter(s => s.n >= seuil);
+      if (petits.length) subs.push({ lib: `Autres (${petits.length} subfield${petits.length > 1 ? "s" : ""})`, n: petits.reduce((s, x) => s + x.n, 0),
+        detail: petits.map(x => `${x.lib} (${x.n})`).join(", ") });
+    }
+    return { field, nf, d: dom(domDe.get(field)), subs };
+  });
+  // Échelle commune calculée sans « Non classé » (sa barre, souvent la plus longue, est tronquée à la largeur)
+  const max = Math.max(1, ...blocs.filter(b => b.field !== "Non classé").flatMap(b => b.subs.map(s => s.n)));
+  const lignesCsv = blocs.flatMap(b => b.subs.map(s => ({ ...s, field: b.field, domaine: b.d[0], part: s.n / total })));
+  const doms = [...new Set(blocs.map(b => b.d[0]))].map(l => Object.values(DOMAINES).find(x => x[0] === l)).filter(Boolean);
+  return carteBrute("carte large", "Actions par field et subfield",
+    (seuil ? `Sans filtre, les subfields de moins de ${seuil} actions sont regroupés en « Autres » dans leur field. ` : "Tous les subfields de la sélection sont affichés. ") +
+    "Couleur : domaine OpenAlex.", [
+    total ? blocs.map(b => [
+      h("div", { class: "fh" }, h("i", { style: { background: b.d[1], borderColor: CLAIRES.has(b.d[1]) ? C.bleuf : "transparent" } }), h("b", {}, b.field),
+        h("small", {}, `${fmtNombre(b.nf)} actions · ${fmtPart(b.nf / total)} · ${b.d[0]}`)),
+      hbarres(b.subs.map(s => ({ ...s, libAff: s.lib })), { couleur: b.d[1], valeur: s => s.n, fmt: fmtNombre, max, titre: s => s.detail })])
+      : h("p", { class: "vide" }, "Aucune action ne correspond à ces filtres."),
+    h("div", { class: "legende" }, doms.map(([l, c]) => h("span", { style: { "--c": c, "--b": CLAIRES.has(c) ? C.bleuf : "transparent" } }, l))),
+    tableau(lignesCsv, [["Subfield", l => l.lib, "txt"], ["Field", l => l.field, "txt"], ["Domaine", l => l.domaine, "txt"],
+      ["Nombre d'actions", l => l.n, fmtNombre], ["Part des actions", l => l.part, fmtPart]],
+      { lib: "Total (actions de la sélection)", 3: fmtNombre(total), 4: fmtPart(1) })]);
+}
+
+// Matrice de comptage (SVG) ; un clic sur une ligne filtre la page
+function matrice(rows, lignesDe, colonnesDe, lignes, colonnes, auClic) {
+  if (!lignes.length || !colonnes.length) return h("p", { class: "vide" }, "Aucune action ne correspond à ces filtres.");
+  const n = new Map(); let max = 1;
+  for (const r of rows) for (const a of lignesDe(r)) for (const b of colonnesDe(r)) {
+    const k = a + "\u0000" + b; n.set(k, (n.get(k) || 0) + 1);
+    if (a !== "Non classé" && b !== "Non classé" && a !== "Non renseigné") max = Math.max(max, n.get(k));   // intensité hors « Non classé »
+  }
+  const coupe = (s, k) => s.length > k ? s.slice(0, k - 1) + "…" : s;
+  const lw = Math.min(290, 12 + 6.3 * Math.max(...lignes.map(l => coupe(l, 46).length)));
+  const ch = Math.min(150, 14 + 4.6 * Math.max(...colonnes.map(c => coupe(c, 28).length)));
+  const cell = 30, W = lw + cell * colonnes.length + 40, H = ch + cell * lignes.length + 6;
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs, txt) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (txt != null) e.textContent = txt; return e; };
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: "matrice", role: "img" });
+  colonnes.forEach((c, j) => {
+    const t = el("text", { transform: `translate(${lw + j * cell + cell / 2},${ch - 6}) rotate(-45)`, "font-size": 10.5, fill: "#5b6f80" }, coupe(c, 28));
+    t.append(el("title", {}, c)); svg.append(t);
+  });
+  lignes.forEach((l, i) => {
+    const y = ch + i * cell;
+    const t = el("text", { x: lw - 8, y: y + cell / 2 + 4, "text-anchor": "end", "font-size": 11, fill: C.bleuf, class: "rl" }, coupe(l, 46));
+    t.append(el("title", {}, `${l} — cliquer pour filtrer`)); t.addEventListener("click", () => auClic(l)); svg.append(t);
+    colonnes.forEach((c, j) => {
+      const v = n.get(l + "\u0000" + c) || 0, x = lw + j * cell, f = Math.min(1, Math.sqrt(v / max));
+      const r = el("rect", { x: x + 1, y: y + 1, width: cell - 2, height: cell - 2, rx: 3, fill: v ? (c === "Non classé" ? C.grisf : C.bleuf) : C.grisc, "fill-opacity": v ? (0.12 + 0.88 * f).toFixed(3) : 0.6 });
+      r.append(el("title", {}, `${l} · ${c} : ${v} action${v > 1 ? "s" : ""}`)); svg.append(r);
+      if (v) svg.append(el("text", { x: x + cell / 2, y: y + cell / 2 + 4, "text-anchor": "middle", "font-size": 10.5, "pointer-events": "none",
+        fill: f > 0.55 ? "#fff" : C.bleuf }, String(v)));
+    });
+  });
+  return h("div", { class: "vdefil" }, svg);
+}
+
+function carteInstituts(rows) {
+  const lignes = compter(rows, p => p.instituts.length ? p.instituts : ["Non renseigné"]).map(x => x[0]);
+  const cols = compter(rows, p => p.field).sort(nonClasseALaFin).map(x => x[0]);
+  const csv = lignes.map(l => ({ lib: l, ...Object.fromEntries(cols.map(c => [c, rows.filter(p => (p.instituts.length ? p.instituts : ["Non renseigné"]).includes(l) && p.field === c).length])) }));
+  return carteBrute("carte large", "Instituts × fields", "Nombre d'actions par case. Une action portée par deux instituts compte dans chacun. Cliquer sur un institut filtre la page.", [
+    matrice(rows, p => p.instituts.length ? p.instituts : ["Non renseigné"], p => [p.field], lignes, cols,
+      l => { filtres.institut = filtres.institut === l ? "" : l; afficher(); }),
+    tableau(csv, [["Institut", l => l.lib, "txt"], ...cols.map(c => [c, l => l[c], fmtNombre])])]);
+}
+
+function cartePays(rows) {
+  const lignes = compter(rows, p => p.pays).slice(0, P.topPays).map(x => x[0]);
+  const subs = compter(rows, p => p.subfield).sort(nonClasseALaFin);
+  const cols = [...subs.filter(s => s[0] !== "Non classé").slice(0, P.topSubfields), ...subs.filter(s => s[0] === "Non classé")].map(x => x[0]);
+  const csv = lignes.map(l => ({ lib: l, ...Object.fromEntries(cols.map(c => [c, rows.filter(p => p.pays.includes(l) && p.subfield === c).length])) }));
+  return carteBrute("carte large", "Pays partenaires × subfields",
+    `Les ${P.topPays} pays et les ${P.topSubfields} subfields les plus fréquents de la sélection. Une action avec plusieurs pays compte dans chacun. Cliquer sur un pays filtre la page.`, [
+    matrice(rows, p => p.pays, p => [p.subfield], lignes, cols, l => { filtres.pays = filtres.pays === l ? "" : l; afficher(); }),
+    tableau(csv, [["Pays", l => l.lib, "txt"], ...cols.map(c => [c, l => l[c], fmtNombre])])]);
+}
+
+// Liste des actions : recherche et tri ; le CSV reprend la liste affichée
+const COLS_LISTE = [["id", "N°"], ["acronyme", "Acronyme"], ["titre", "Titre"], ["instituts", "Institut"], ["pays", "Pays"],
+  ["field", "Field"], ["subfield", "Subfield"], ["topic", "Topic"]];
+function carteListe(rows) {
+  const corps = h("tbody"), compte = h("span", { class: "st" });
+  const det = h("details", { class: "tab", open: true }, h("summary", {}, "Liste"));
+  const texte = (p, k) => Array.isArray(p[k]) ? p[k].join(", ") : String(p[k] ?? "");
+  const dessiner = () => {
+    const q = sansAccent(recherche.trim());
+    let l = q ? rows.filter(p => sansAccent([p.action, p.acronyme, p.titre, p.topic, p.topics2, p.subfield, p.field, p.motscles].join(" ")).includes(q)) : rows.slice();
+    l.sort((a, b) => tri.sens * (tri.cle === "id" ? a.id - b.id : triAlpha(texte(a, tri.cle), texte(b, tri.cle))));
+    compte.textContent = `${fmtNombre(l.length)} actions affichées sur ${fmtNombre(D.projets.length)}.`;
+    corps.replaceChildren(...l.map(p => h("tr", {}, COLS_LISTE.map(([k]) => h("td", { class: k === "id" ? null : "txt" }, texte(p, k))))));
+    det._donnees = { lignes: l, colonnes: COLS_LISTE.map(([k, t]) => [t, p => texte(p, k), "txt"]).concat([["Topics secondaires", p => p.topics2, "txt"], ["Mots-clés OpenAlex", p => p.motscles, "txt"]]) };
+  };
+  const entetes = COLS_LISTE.map(([k, t]) => h("th", { style: { cursor: "pointer", textAlign: "left" }, title: "Trier",
+    onclick: () => { tri = { cle: k, sens: tri.cle === k ? -tri.sens : 1 }; dessiner(); } }, t));
+  det.append(h("div", { class: "tablo liste-projets" }, h("table", {}, h("thead", {}, h("tr", {}, entetes)), corps)));
+  const champ = h("input", { type: "search", placeholder: "Rechercher une action ou un thème", value: recherche, "aria-label": "Rechercher",
+    style: { width: "min(100%, 26rem)" }, oninput: e => { recherche = e.target.value; dessiner(); } });
+  dessiner();
+  return carteBrute("carte large", "Liste des actions", "Recherche dans le nom, l'acronyme, le titre, les topics (principal et secondaires), le subfield, le field et les mots-clés OpenAlex. Cliquer sur un en-tête pour trier.",
+    [compte, h("div", { style: { margin: "6px 0" } }, champ), det]);
+}
+
+function afficher() {
+  if (!D) return;
+  barreOutils();
+  const rows = selection();
+  const app = document.getElementById("app"), y = window.scrollY;
+  let cartes;
+  try { cartes = [carteChiffres(rows), carteFields(rows), carteInstituts(rows), cartePays(rows), carteListe(rows)]; }
+  catch (err) { console.error(err); cartes = [h("div", { class: "erreur" }, "Erreur de calcul : " + err.message)]; }
+  app.replaceChildren(...cartes);
+  window.scrollTo(0, y);
+}
+
+let enCours = null;
+async function demarrer(force) {
+  if (force) for (const k of Object.keys(cacheTables)) delete cacheTables[k];
+  if (enCours) return enCours;
+  enCours = (async () => {
+    try {
+      D = preparer(await chargerDonnees(OPTIONS));
+      document.getElementById("sous-titre").textContent = `Classement OpenAlex — données Grist en direct — version ${VERSION}`;
+      bandeauEtat(); afficher();
+    } catch (err) {
+      console.error(err);
+      document.getElementById("app").replaceChildren(h("div", { class: "erreur" }, err.message || String(err)));
+    } finally { enCours = null; }
+  })();
+  return enCours;
+}
+
+let OPTIONS = {}, premier = true;
+grist.ready({ requiredAccess: "full", allowSelectBy: false });
+function lancer(opts) { OPTIONS = opts || {}; if (premier) { premier = false; demarrer(); } }
+grist.onOptions(opts => lancer(opts));
+setTimeout(() => { if (premier) lancer({}); }, 1500);
+let minuterie = null, nbEnvois = 0;
+grist.onRecords(() => { if (nbEnvois++ === 0 || premier) return; clearTimeout(minuterie); minuterie = setTimeout(() => demarrer(true), 600); });
+
+</script>
+</body>
+</html>
