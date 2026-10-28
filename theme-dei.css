@@ -1,0 +1,80 @@
+/* ============================================================================
+   Thème commun aux tableaux de bord DEI (budget, thématiques, cartographie)
+   Chargé APRÈS la feuille de style de l'application : ne modifie que l'apparence.
+   ============================================================================ */
+:root {
+  --jaune: #FFEB6E; --bleuf: #00284b; --grisc: #ebf0f5; --grisf: #8296a5;
+  --fond: #f6f8fb; --carte: #ffffff; --texte: #00284b; --doux: #5b6f80; --ligne: #dfe6ee;
+  --color-bg: var(--fond); --color-text: var(--texte); --color-accent: var(--bleuf); --color-muted: var(--ligne);
+  --font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+html, body { background: var(--fond); color: var(--texte); font: 13px/1.4 var(--font-family); }
+
+/* En-tête : bandeau bleu foncé, titre à gauche et sous-titre, comme les deux autres widgets */
+#header { position: sticky; top: 0; z-index: 20; background: var(--bleuf); color: #fff; padding: 10px 16px; text-align: left; }
+#header h1 { margin: 0; font-size: 16px; font-weight: 650; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+#header h1 small { font-weight: 400; color: #c9d6e2; font-size: 12px; }
+
+/* Mise en page : panneau de filtres + carte, en cartes blanches ; passe en colonne sur écran étroit */
+#main { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 14px; align-items: start;
+  max-width: none; width: 100%; margin: 0; padding: 12px 16px 0; }
+@media (max-width: 860px) { #main { grid-template-columns: 1fr; } }
+#menu, #map-container { background: var(--carte); border: 1px solid var(--ligne); border-radius: 10px; box-shadow: none; max-height: none; min-width: 0; }
+#menu { flex: none; padding: 14px 16px; position: relative; }
+#map-container { flex: none; padding: 2.5rem .5rem .5rem; }   /* padding haut conservé : le bouton 🗺️ est placé par rapport à lui */
+#map { height: min(72vh, 680px) !important; border-radius: 6px; overflow: hidden; }
+
+/* Titres comme les en-têtes de cartes des autres widgets */
+#menu h1 { font-size: 14px; font-weight: 650; margin: 0 0 4px; }
+#menu hr, #menu > br { display: none; }
+#menu h3 { font-size: 11px; font-weight: 600; color: var(--doux); text-transform: none; margin: 12px 0 4px; }
+#map-title { position: absolute; top: 10px; left: 16px; width: auto; transform: none; text-align: left !important;
+  font-size: 14px; font-weight: 650; color: var(--texte); padding: 0; }
+#nbresults { position: static; display: inline-block; margin: 2px 0 6px; background: var(--grisc); border: 0; border-radius: 8px;
+  padding: 4px 10px; font: 600 12px/1.4 var(--font-family); color: var(--texte); }
+#menu label { font-size: 12px; color: var(--texte); }
+#menu input[type=checkbox] { accent-color: var(--bleuf); }
+
+/* Listes de choix (Choices.js) : mêmes bordures et couleurs que les sélecteurs des autres widgets */
+.choices { font-size: 13px; }
+.choices__inner { background: #fff; border: 1px solid var(--ligne); border-radius: 6px; min-height: 34px; padding: 4px 6px 1px; font-size: 13px; }
+.is-focused .choices__inner, .is-open .choices__inner { border-color: var(--grisf); }
+.choices__input { background: #fff; font-size: 13px; }
+.choices__list--multiple .choices__item { background-color: var(--bleuf) !important; border: 0 !important; border-radius: 12px; font-size: 11.5px; padding: 3px 8px; }
+.choices__list--dropdown .choices__item, .choices__list[aria-expanded] .choices__item { font-size: 12.5px; padding: 6px 10px; }
+.choices__list--dropdown .choices__item--selectable.is-highlighted { background: var(--grisc); }
+.custom-placeholder { font-size: 12px !important; color: var(--grisf) !important; }
+.reset-container > button { font-size: 11px; color: var(--doux); }
+
+/* Liste des actions : carte pleine largeur, tableau au style des autres widgets */
+#description { display: block; max-width: none; margin: 14px 16px 0; padding: 14px 16px; background: var(--carte);
+  border: 1px solid var(--ligne); border-radius: 10px; box-shadow: none; text-align: left; }
+#description > h2 { text-align: left !important; font-size: 14px; font-weight: 650; margin: 0 0 8px; }
+.gridjs { font: 12px/1.4 var(--font-family); color: var(--texte); }
+.gridjs-wrapper { box-shadow: none; border: 1px solid var(--ligne); border-radius: 6px; }
+.gridjs-container { padding: 0; }
+th.gridjs-th { background: #D9E1F2; color: #1F3864; font-weight: 650; padding: 6px 8px; border-color: var(--ligne); }
+td.gridjs-td { color: var(--texte); padding: 5px 8px; border-color: var(--ligne); }
+.gridjs-tr:nth-child(odd) td.gridjs-td { background: #f3f4f7; }
+.gridjs-search-input { font: inherit; border: 1px solid var(--ligne); border-radius: 6px; padding: 5px 8px; }
+.gridjs-footer { border: 0; box-shadow: none; padding: 8px 0 0; }
+.gridjs-pagination .gridjs-pages button { font-size: 12px; }
+#description > div:last-child { text-align: right !important; }
+.download-button { border: 1px solid var(--ligne); background: #fff; color: var(--texte); border-radius: 6px; height: 28px;
+  padding: 0 10px; font: 600 12px var(--font-family); cursor: pointer; }
+.download-button::before { content: "⬇ "; }
+.download-button:hover { background: #fff; color: var(--texte); border-color: var(--grisf); }
+
+/* Pied de page discret, comme la ligne d'état des autres widgets */
+#footer { background: transparent; border: 0; padding: 10px 16px 24px; text-align: left; font-size: 12px; color: var(--doux); margin-top: 0; }
+#error-banner { border-radius: 8px; }
+
+/* Pagination du tableau et largeur sur petit écran */
+.gridjs-pagination { font-size: 12px; color: var(--doux); }
+.gridjs-pagination .gridjs-pages button { border: 1px solid var(--ligne); background: #fff; color: var(--texte); border-radius: 6px;
+  padding: 3px 8px; margin: 0 2px; cursor: pointer; font: inherit; }
+.gridjs-pagination .gridjs-pages button.gridjs-currentPage { background: var(--bleuf); color: #fff; border-color: var(--bleuf); }
+.gridjs-pagination .gridjs-pages button:disabled { opacity: .45; cursor: default; }
+.gridjs-wrapper { overflow-x: auto; }
+#description, #description .gridjs-container { min-width: 0; max-width: 100%; }
+#main > * { min-width: 0; }

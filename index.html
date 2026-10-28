@@ -7,6 +7,8 @@
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
     <script type="module" crossorigin src="./assets/index-D8-VtGRO.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-lw3D20XE.css">
+    <!-- Thème commun aux tableaux de bord DEI (à charger après la feuille de l'application) -->
+    <link rel="stylesheet" href="./assets/theme-dei.css">
   </head>
   <body>
     <div id="error-banner" style="display:none; background:#ffe0e0; color:#900; border:2px solid #c00; padding:10px; margin:10px; font-family:monospace; font-size:12px; white-space:pre-wrap; word-break:break-word;"></div>
@@ -24,7 +26,7 @@
       });
     </script>
     <header id="header">
-      <h1>Cartographie des actions internationales</h1>
+      <h1>Cartographie des actions internationales<small>Partenaires des actions — données Grist en direct</small></h1>
     </header>
 
     <main id="main" role="main"></main>
@@ -32,7 +34,7 @@
     <description id="description"></description>
 
     <footer id="footer">
-      Widget connecté en direct à Grist
+      Fond de carte © CARTO, OpenStreetMap — UAR RIATE, Direction Europe et international (DEI)
     </footer>
 
   </body>
