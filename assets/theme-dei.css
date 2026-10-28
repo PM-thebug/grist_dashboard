@@ -100,3 +100,6 @@ body.carte-plein-ouvert { overflow: hidden; }
 .maplibregl-popup-content .pop-sep { height: 1px; background: var(--ligne); margin: 8px 0; }
 #map-container .maplibregl-popup-content span, #map-container .maplibregl-popup-content div { font-size: inherit; }
 #diag-actions { font-size: 11px; color: var(--doux); margin: 0 0 6px; line-height: 1.35; }
+.maplibregl-popup-content .pop-titre { font-weight: 650; }
+.maplibregl-popup-content .pop-part { font-size: 12px; margin-top: 2px; }
+.maplibregl-popup-content .pop-info { font-size: 11px; color: var(--doux); }
