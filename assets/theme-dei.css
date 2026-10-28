@@ -21,7 +21,7 @@ html, body { background: var(--fond); color: var(--texte); font: 13px/1.4 var(--
 @media (max-width: 860px) { #main { grid-template-columns: 1fr; } }
 #menu, #map-container { background: var(--carte); border: 1px solid var(--ligne); border-radius: 10px; box-shadow: none; max-height: none; min-width: 0; }
 #menu { flex: none; padding: 14px 16px; position: relative; }
-#map-container { flex: none; padding: 2.5rem .5rem .5rem; }   /* padding haut conservé : le bouton 🗺️ est placé par rapport à lui */
+#map-container { flex: none; padding: 2.5rem .5rem .5rem; }
 #map { height: min(72vh, 680px) !important; border-radius: 6px; overflow: hidden; }
 
 /* Titres comme les en-têtes de cartes des autres widgets */
@@ -78,3 +78,24 @@ td.gridjs-td { color: var(--texte); padding: 5px 8px; border-color: var(--ligne)
 .gridjs-wrapper { overflow-x: auto; }
 #description, #description .gridjs-container { min-width: 0; max-width: 100%; }
 #main > * { min-width: 0; }
+
+/* Plein écran : vrai plein écran ou, si le cadre Grist le refuse, carte agrandie dans le widget */
+#map-container.carte-plein { position: fixed !important; inset: 0; z-index: 100; border-radius: 0; border: 0; padding: 2.5rem .5rem .5rem; }
+#map-container.carte-plein #map, #map-container:fullscreen #map { height: calc(100vh - 6rem) !important; }
+#map-container:fullscreen { background: #fff; padding: 2.5rem .5rem .5rem; }
+body.carte-plein-ouvert { overflow: hidden; }
+
+/* Légende sous la carte */
+#map-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; padding: 8px 8px 2px; font-size: 11.5px; color: var(--texte); }
+#map-legend .leg::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px;
+  background: var(--c); border: 1px solid var(--bleuf); }
+#map-legend .leg-note { color: var(--doux); }
+#map-container #map-legend span { font-size: 11.5px; color: inherit; }
+#map-container #map-legend .leg-note { color: var(--doux); }
+
+/* Bulle d'un lieu : liste défilante des actions */
+.maplibregl-popup-content { font: 12px/1.4 var(--font-family); color: var(--texte); padding: 10px 12px; border-radius: 8px; }
+.maplibregl-popup-content .pop-n { font-weight: 650; margin-bottom: 6px; padding-right: 14px; }
+.maplibregl-popup-content .pop-liste { max-height: 260px; overflow-y: auto; padding-right: 4px; }
+.maplibregl-popup-content .pop-sep { height: 1px; background: var(--ligne); margin: 8px 0; }
+#map-container .maplibregl-popup-content span, #map-container .maplibregl-popup-content div { font-size: inherit; }
