@@ -103,3 +103,4 @@ body.carte-plein-ouvert { overflow: hidden; }
 .maplibregl-popup-content .pop-titre { font-weight: 650; }
 .maplibregl-popup-content .pop-part { font-size: 12px; margin-top: 2px; }
 .maplibregl-popup-content .pop-info { font-size: 11px; color: var(--doux); }
+#map-legend .leg-ligne::before { width: 18px; height: 0; border: 0; border-top: 2px solid var(--c); border-radius: 0; vertical-align: 3px; opacity: .8; }
