@@ -110,6 +110,15 @@ tr.total td { font-weight: 700; background: #fff; border-top: 1px solid var(--li
 .attente { padding: 40px 16px; color: var(--doux); text-align: center; }
 .erreur { padding: 16px; margin: 16px; background: #fff0f0; border: 1px solid #f3b9b9; border-radius: 8px; white-space: pre-wrap; }
 @media (max-width: 640px) { .deux { grid-template-columns: 1fr; } .hbarres { grid-template-columns: minmax(80px, 38%) 1fr auto; } }
+.outils-donnees { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.compte-donnees { color: var(--doux); font-size: 12px; }
+.tablo-donnees { max-height: 72vh; overflow: auto; border: 1px solid var(--ligne); border-radius: 6px; }
+.tablo-donnees table { width: max-content; min-width: 100%; }
+.tablo-donnees thead th { position: sticky; top: 0; z-index: 1; text-align: left; cursor: pointer; }
+.tablo-donnees thead tr.filtres-colonnes th { top: 25px; background: #eef2f8; cursor: default; padding: 3px 4px; }
+.tablo-donnees .filtres-colonnes input { width: 100%; min-width: 80px; font-size: 11.5px; padding: 3px 6px; max-width: none; }
+.tablo-donnees td { text-align: left; max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--texte); }
+.tablo-donnees td.num { text-align: right; }
 </style>
 </head>
 <body>
@@ -123,7 +132,7 @@ tr.total td { font-weight: 700; background: #fff; border-top: 1px solid var(--li
 
 <script>
 "use strict";
-const VERSION = "27 oct. 2026 · v9 (thématiques OpenAlex)";
+const VERSION = "29 oct. 2026 · v10 (tableau des actions)";
 // ============================================================================
 // 1. PARAMÈTRES — mêmes règles que le script R synthese_actions_internationales.R
 // ============================================================================
@@ -327,6 +336,10 @@ async function chargerDonnees(options) {
     return out;
   }
   const A = await lire(tA, ca), F = await lire(tF, cf);
+  // Toutes les colonnes de la table des actions, pour l'onglet « Tableau des actions »
+  const colsBrutes = (await colonnesDe(tA)).filter(c => !/^gristHelper/.test(c.colId) && c.colId !== "manualSort");
+  const brut = { colonnes: colsBrutes.map(c => ({ label: c.label, type: c.type })), valeurs: [], n: (await table(tA)).id.length };
+  for (const c of colsBrutes) brut.valeurs.push(await valeurs(tA, c));
   const manq = [...A.manquantes.map(x => `${tA} : ${x}`), ...F.manquantes.map(x => `${tF} : ${x}`)];
   if (manq.length) throw new Error("Colonnes introuvables — " + manq.join(" ; "));
   // Libellés des instituts lus dans la table référencée par INSTITUT (si c'est une colonne
@@ -351,13 +364,13 @@ async function chargerDonnees(options) {
       if (Object.keys(lu).length) { effectifs = lu; tEff = tid; break; }
     } catch (e) { /* table masquée */ }
   }
-  return { tA, tF, A, F, nomsRef, effectifs, tEff };
+  return { tA, tF, A, F, nomsRef, effectifs, tEff, brut };
 }
 
 // ============================================================================
 // 4. PRÉPARATION — reproduit la section 2 du script R
 // ============================================================================
-function preparer({ tA, tF, A, F, nomsRef, effectifs, tEff }) {
+function preparer({ tA, tF, A, F, nomsRef, effectifs, tEff, brut }) {
   const messages = [];
   // --- Actions
   let actions = [];
@@ -451,7 +464,7 @@ function preparer({ tA, tF, A, F, nomsRef, effectifs, tEff }) {
   const ordreCat = Object.keys(mCat).sort((x, y) => mCat[y] - mCat[x]);
   const couleurCat = {}; ordreCat.forEach((c, i) => couleurCat[c] = PALETTE_CAT[i % PALETTE_CAT.length]);
 
-  return { tA, tF, effectifs, tEff, colsA: A.cols, colsF: F.cols, noms, actions, baseFin, baseInst, nonRapproches, sansFin, ecarts, horsPorteur, messages, lib, ordreCat, couleurCat };
+  return { brut, tA, tF, effectifs, tEff, colsA: A.cols, colsF: F.cols, noms, actions, baseFin, baseInst, nonRapproches, sansFin, ecarts, horsPorteur, messages, lib, ordreCat, couleurCat };
 }
 
 // ============================================================================
@@ -950,10 +963,96 @@ function serieFinanceur(f, avecSynthese) {
   return cartes;
 }
 
+// --------------------------------------------------------------------------
+// Vue 3 : tableau d'origine des actions « en cours », filtrable par colonne et téléchargeable
+// --------------------------------------------------------------------------
+P.colonnesEnCours = ["EN COURS", "OUTILS EN COURS"];   // première colonne trouvée = filtre des lignes
+P.maxLignesAffichees = 1000;
+const TD = { filtres: {}, recherche: "", tri: null };
+const vraiG = v => v === true || v === 1 || (typeof v === "string" && /^(oui|vrai|true|1|x)$/i.test(v.trim()));
+function texteCellule(v, type) {
+  if (v == null) return "";
+  if (typeof v === "boolean") return v ? "Oui" : "Non";
+  if (typeof v === "number" && /^Date/.test(type || "")) {
+    const d = new Date(v * 1000); return isNaN(d) ? String(v) : d.toLocaleDateString("fr-FR", /^DateTime/.test(type) ? { timeZone: "Europe/Paris" } : { timeZone: "UTC" });
+  }
+  if (typeof v === "number") return Number.isInteger(v) ? (Math.abs(v) >= 10000 ? groupe(v) : String(v)) : String(v).replace(".", ",");   // montants groupés, années intactes
+  return String(v);
+}
+// Filtre d'une colonne : texte contenu (sans casse ni accents), ou comparaison numérique
+// (« >1000 », « <=5000 », « =2026 »), ou « vide » / « non vide »
+function testFiltre(f, v, txt) {
+  const q = f.trim(); if (!q) return true;
+  if (/^vide$/i.test(q)) return txt === "";
+  if (/^non vide$/i.test(q)) return txt !== "";
+  const m = /^(>=|<=|>|<|=)\s*(-?[\d\s\u00a0]+(?:[.,]\d+)?)$/.exec(q);
+  if (m && typeof v === "number") {
+    const x = Number(m[2].replace(/[\s\u00a0]/g, "").replace(",", "."));
+    return m[1] === ">" ? v > x : m[1] === "<" ? v < x : m[1] === ">=" ? v >= x : m[1] === "<=" ? v <= x : v === x;
+  }
+  return sansAccent(txt).includes(sansAccent(q));
+}
+function vueDonnees() {
+  const B = D.brut;
+  if (!B) return [h("div", { class: "erreur" }, "Table des actions non lue.")];
+  const cols = B.colonnes.map((c, j) => ({ ...c, j }));
+  const iEnCours = (() => { for (const nom of P.colonnesEnCours) { const k = cols.findIndex(c => norm(c.label) === norm(nom)); if (k >= 0) return k; } return -1; })();
+  const lignes = [];
+  for (let i = 0; i < B.n; i++) if (iEnCours < 0 || vraiG(B.valeurs[iEnCours][i])) lignes.push(i);
+  const txt = (i, c) => texteCellule(B.valeurs[c.j][i], c.type);
+  const corps = h("tbody"), compte = h("span", { class: "compte-donnees" });
+  const filtrees = () => {
+    const actifs = cols.filter(c => (TD.filtres[c.label] || "").trim());
+    const q = sansAccent(TD.recherche.trim());
+    let l = lignes.filter(i => actifs.every(c => testFiltre(TD.filtres[c.label], B.valeurs[c.j][i], txt(i, c))) &&
+      (!q || cols.some(c => sansAccent(txt(i, c)).includes(q))));
+    if (TD.tri) {
+      const c = cols.find(x => x.label === TD.tri.col);
+      if (c) l = l.slice().sort((a, b) => { const va = B.valeurs[c.j][a], vb = B.valeurs[c.j][b];
+        const r = typeof va === "number" && typeof vb === "number" ? va - vb : triAlpha(txt(a, c), txt(b, c)); return TD.tri.sens * r; });
+    }
+    return l;
+  };
+  const dessiner = () => {
+    const l = filtrees();
+    compte.textContent = `${fmtNombre(l.length)} ligne${l.length > 1 ? "s" : ""} sur ${fmtNombre(lignes.length)}` +
+      (l.length > P.maxLignesAffichees ? ` — ${fmtNombre(P.maxLignesAffichees)} premières affichées (le téléchargement contient tout)` : "");
+    corps.replaceChildren(...l.slice(0, P.maxLignesAffichees).map(i => h("tr", {}, cols.map(c => {
+      const t = txt(i, c); return h("td", { class: typeof B.valeurs[c.j][i] === "number" ? "num" : "txt", title: t.length > 60 ? t : null }, t.length > 120 ? t.slice(0, 119) + "…" : t); }))));
+  };
+  const entetes = h("tr", {}, cols.map(c => h("th", { title: "Trier", onclick: () => {
+    TD.tri = TD.tri && TD.tri.col === c.label ? { col: c.label, sens: -TD.tri.sens } : { col: c.label, sens: 1 }; dessiner(); } },
+    c.label, TD.tri && TD.tri.col === c.label ? (TD.tri.sens > 0 ? " ▲" : " ▼") : "")));
+  const champs = h("tr", { class: "filtres-colonnes" }, cols.map(c => h("th", {}, h("input", { type: "search", value: TD.filtres[c.label] || "",
+    placeholder: "filtrer", "aria-label": `Filtrer ${c.label}`, oninput: e => { TD.filtres[c.label] = e.target.value; dessiner(); } }))));
+  const telecharger = () => {
+    const l = filtrees();
+    const cell = (i, c) => { const v = B.valeurs[c.j][i]; let t = typeof v === "number" && !/^Date/.test(c.type || "") ? String(v).replace(".", ",") : txt(i, c);
+      t = t.replace(/[\u00a0\u202f]/g, " "); return /[;"\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+    const csv = [cols.map(c => /[;"]/.test(c.label) ? `"${c.label.replace(/"/g, '""')}"` : c.label).join(";"), ...l.map(i => cols.map(c => cell(i, c)).join(";"))].join("\r\n");
+    enregistrer(new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" }), `${P.annee}_tableau_des_actions_en_cours.csv`);
+  };
+  const effacer = () => { TD.filtres = {}; TD.recherche = ""; TD.tri = null; afficher(); };
+  dessiner();
+  const nomEnCours = iEnCours >= 0 ? cols[iEnCours].label : null;
+  const sec = carteBrute("carte large carte-donnees", `Tableau des actions — ${D.tA}`,
+    nomEnCours ? `Lignes dont la colonne « ${nomEnCours} » est vraie. Un filtre par colonne (texte contenu, ou >, <, >=, <=, = pour les nombres, « vide », « non vide »), une recherche dans toutes les colonnes ; clic sur un en-tête pour trier.`
+               : "⚠ Colonne « EN COURS » introuvable : toutes les lignes sont affichées.", [
+    h("div", { class: "outils-donnees" },
+      h("input", { type: "search", placeholder: "Rechercher dans toutes les colonnes", value: TD.recherche, style: { width: "min(100%, 22rem)" },
+        oninput: e => { TD.recherche = e.target.value; dessiner(); } }),
+      h("button", { class: "petit", onclick: effacer }, "Effacer les filtres"),
+      h("button", { class: "btn-dl", onclick: telecharger, title: "Télécharger les lignes filtrées (CSV, s'ouvre dans Excel)" }, "⬇ Télécharger (CSV)"),
+      compte),
+    h("div", { class: "tablo tablo-donnees" }, h("table", {}, h("thead", {}, entetes, champs), corps))]);
+  sec.querySelectorAll(".entete .btn-dl").forEach(b => b.remove());   // pas d'export image pour ce tableau
+  return [sec];
+}
+
 // ============================================================================
 // 7. ORCHESTRATION
 // ============================================================================
-const VUES = { global: "Toutes les actions", financeur: "Par financeur" };
+const VUES = { global: "Toutes les actions", financeur: "Par financeur", donnees: "Tableau des actions" };
 
 function barreOutils() {
   const o = document.getElementById("outils"); o.replaceChildren();
@@ -1007,7 +1106,7 @@ function afficher() {
   const y = window.scrollY;
   let cartes;
   try {
-    cartes = etat.vue === "financeur" ? serieFinanceur(etat.financeur, true) : vueGlobale();
+    cartes = etat.vue === "financeur" ? serieFinanceur(etat.financeur, true) : etat.vue === "donnees" ? vueDonnees() : vueGlobale();
   } catch (err) { console.error(err); cartes = [h("div", { class: "erreur" }, "Erreur de calcul : " + err.message)]; }
   app.replaceChildren(...cartes);
   window.scrollTo(0, y);
